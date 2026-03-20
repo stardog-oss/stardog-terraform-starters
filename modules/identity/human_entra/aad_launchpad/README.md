@@ -1,0 +1,153 @@
+# Azure AD Application (Launchpad) — Terraform Module
+
+This module creates a Microsoft Entra ID (Azure AD) **Application** + **Service Principal**, assigns **owners**, generates a **client secret**, and stores that secret (and client id) using a pluggable **secret backend** (Azure Key Vault, AWS Secrets Manager, etc.). It follows best practices for:
+- Stable display name derived from an `inst_id` (without cross‑referencing variables in defaults).
+- Non‑deprecated secret expiry using `end_date` (computed RFC3339 timestamp).
+- Capturing the generated secret in a managed secret backend (since Entra never returns it again).
+
+---
+
+## What it creates
+
+- `azuread_application` with: `sign_in_audience = AzureADMultipleOrgs`, `web.redirect_uris`, and `implicit_grant` enabled for access & id tokens.
+- `azuread_service_principal` for that application.
+- Owner assignments managed directly on the `azuread_application` resource.
+- `azuread_application_password` with a **random** secret and a **computed end date**.
+- Two secret entries persisted through the [`modules/secret_store`](../../../secret_store) helper:
+  - `<display>-client-secret` (the generated client secret)
+  - `<display>-client-id` (the Application’s client_id)
+
+---
+
+## Requirements
+
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    azuread = { source = "hashicorp/azuread", version = ">= 2.44.0" }
+    azurerm = { source = "hashicorp/azurerm", version = ">= 4.0.0" } # required when backend.kind = "azure_key_vault"
+    aws     = { source = "hashicorp/aws",     version = ">= 5.0.0" } # required when backend.kind = "aws_secrets_manager"
+    time    = { source = "hashicorp/time",    version = ">= 0.11.0" }
+    random  = { source = "hashicorp/random",  version = ">= 3.5.0" }
+  }
+}
+
+provider "azuread" {}
+provider "azurerm" { features {} } # only when storing secrets in Azure Key Vault
+provider "aws"     { region = "us-east-1" } # only when storing secrets in AWS Secrets Manager
+```
+
+> The identity running Terraform must be able to **create applications/service principals** (directory/app admin) and **write to the selected secret backend** (Key Vault data‑plane role, Secrets Manager permissions, etc.).
+
+---
+
+## Inputs
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `inst_id` | `string` | n/a | Short instance identifier used for names/labels (e.g., `profile-a`). |
+| `display_name` | `string` | `null` | Explicit app display name. If `null`, the module uses `"<inst_id> - Launchpad"` at apply. |
+| `redirect_uris` | `list(string)` | n/a | Web redirect URIs for the application. |
+| `owner_object_ids` | `list(string)` | `[]` | Entra **object** IDs (users or service principals) to set as owners of the app registration. |
+| `secret_backend` | `object` | n/a | Backend configuration describing where to persist secrets (e.g., Azure Key Vault or AWS Secrets Manager). See examples below. |
+
+> Recommendation: Use a `local` to default the display name instead of referencing another variable inside a variable default.
+
+```hcl
+locals {
+  effective_display_name = coalesce(var.display_name, "${var.inst_id} - Launchpad")
+}
+```
+
+---
+
+## Usage
+
+### Azure Key Vault example
+
+```hcl
+locals {
+  secret_backend = {
+    kind   = "azure_key_vault"
+    config = { key_vault_id = module.akv.id }
+  }
+}
+
+module "aad_launchpad" {
+  source           = "../../modules/identity/human_entra/aad_launchpad"
+  inst_id          = var.inst_id
+  redirect_uris    = var.launchpad_redirect_uris
+  owner_object_ids = local.owner_ids
+  secret_backend   = local.secret_backend
+}
+```
+
+### AWS Secrets Manager example
+
+```hcl
+locals {
+  secret_backend = {
+    kind   = "aws_secrets_manager"
+    config = { secret_arn = module.secretvault.arn }
+  }
+}
+
+module "aad_launchpad" {
+  source           = "../../modules/identity/human_entra/aad_launchpad"
+  inst_id          = var.inst_id
+  redirect_uris    = var.launchpad_redirect_uris
+  owner_object_ids = local.owner_ids
+  secret_backend   = local.secret_backend
+}
+```
+
+---
+
+## Rotation options
+
+- **Manual**: taint `random_password.secret` (or change a keeper) to force a new value → creates a new AAD password + new secret version in AKV.
+- **Scheduled**: use `time_rotating` to drive periodic rotation and keepers on `random_password`.
+  ```hcl
+  resource "time_rotating" "yearly" { rotation_days = 365 }
+  resource "random_password" "secret" {
+    length  = 32
+    special = true
+    keepers = { rotate = time_rotating.yearly.id }
+  }
+  ```
+
+---
+
+## Outputs (suggested)
+
+If you want to expose IDs downstream, add outputs like:
+```hcl
+output "application_id" { value = azuread_application.app.application_id }
+output "client_id"      { value = azuread_application.app.client_id }
+output "sp_object_id"   { value = azuread_service_principal.sp.id }
+```
+
+Secret material should be retrieved from your chosen backend (`module.akv`, `module.secretvault`, etc.) using the deterministic names generated by the module (`aad-<display>-client-secret`, `aad-<display>-client-id`).
+
+---
+
+## Troubleshooting
+
+- **Missing permissions**: Ensure your operator identity can create apps/SPs and write to the configured secret backend (Key Vault RBAC/access policy, Secrets Manager permissions, etc.).
+- **“Required attribute ... not specified” / HCL parse errors**: Write nested blocks over multiple lines (no one‑liners for blocks).
+- **Secret not retrievable later**: Always rely on the copy stored in your secret backend—Entra returns the password only once at creation time.
+- **RBAC on KV**: If using Azure Key Vault with RBAC data‑plane, assign *Key Vault Secrets Officer* (or better) to the Terraform identity at the vault scope.
+
+---
+
+## See Also
+- [Shared Launchpad/SPARQL stack](../shared_stack/README.md) - provisions both applications together and centralises secret handling.
+- [SPARQL application module](../aad_sparql/README.md) - companion registration that exposes roles for the Stardog endpoint.
+
+---
+
+## Security notes
+
+- The plaintext client secret is stored in **Terraform state** (input to resources). Use a **remote backend**, restrict access, and avoid printing it in outputs.
+- Scope access to whichever secret backend you use (e.g., Key Vault RBAC, AWS IAM policies) so that only automation identities can read/write the entries.

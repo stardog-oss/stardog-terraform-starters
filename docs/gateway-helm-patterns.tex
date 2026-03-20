@@ -1,0 +1,80 @@
+\documentclass{beamer}
+\usetheme{CambridgeUS}
+\title{Helm Gateway \& Certificate Patterns}
+\author{Stardog Platform Enablement}
+\date{\today}
+
+\begin{document}
+
+\frame{\titlepage}
+
+\begin{frame}{Why This Matters}
+\begin{itemize}
+  \item Stardog workloads can reuse a shared Envoy Gateway or create their own.
+  \item Cert-manager automation might live in Terraform or within each Helm chart.
+  \item Choosing the correct pattern keeps TLS ownership and permissions clear.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Pattern 1: Certificate Outside, Routes Inside}
+\begin{itemize}
+  \item Platform IaC (Terraform) installs cert-manager, ACME Issuer, Certificates, and Gateway listeners.
+  \item Stardog Helm releases render only HTTPRoute / TCPRoute resources via \texttt{parentRefs}.
+  \item Centralizes TLS secrets, lets apps deploy without elevated RBAC, and shares one Let's Encrypt cert across HTTPS \& BI TCP.
+  \item Reminder: set \texttt{gateway.http.createGateway=false} and \texttt{gateway.http.tls.enabled=false}.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Pattern 2: Everything Outside the Chart}
+\begin{itemize}
+  \item All Gateway objects (routes, certs, services) are defined in a platform repo.
+  \item Ideal for regulated or GitOps-heavy orgs with strict separation of duties.
+  \item Downside: every hostname/path change requires a platform change request.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Pattern 3: Routes \& Certificates in the Chart}
+\begin{itemize}
+  \item Enable \texttt{gateway.http.createGateway=true} and \texttt{gateway.http.tls.enabled=true}.
+  \item The chart renders Gateways, listeners, Certificates, and routes together.
+  \item Great for isolated clusters or teams needing autonomy, but may duplicate LoadBalancers/certs.
+  \item Requires higher permissions because the release manages Secrets and CRDs.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Choosing the Right Pattern}
+\begin{tabular}{|p{4cm}|p{6cm}|}
+\hline
+\textbf{Question} & \textbf{Recommended Pattern} \\
+\hline
+Shared Envoy Gateway managed by Terraform? & Pattern 1 \\
+\hline
+Security team owns every listener/cert? & Pattern 2 \\
+\hline
+Isolated cluster or need app-level autonomy? & Pattern 3 \\
+\hline
+\end{tabular}
+\vspace{0.5cm}
+\begin{itemize}
+  \item Gateways own the external port: only one listener can terminate TLS for a given IP:port.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Hands-On Checklist (Pattern 1)}
+\begin{enumerate}
+  \item Apply Terraform so \texttt{envoy\_acme\_issuer} and \texttt{envoy\_certificate} exist.
+  \item Configure \texttt{values.stardog.yaml} with shared \texttt{parentRefs} and redirect settings.
+  \item Deploy Helm; verify HTTPRoute/TCPRoute attachments.
+  \item Validate TLS using \texttt{openssl s\_client -connect bi.<domain>:5806}.
+\end{enumerate}
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\begin{itemize}
+  \item Certificates and routes can live in different layers—just document ownership.
+  \item Stardog Helm works as a ``route only'' consumer when a shared Gateway handles TLS.
+  \item For BI TCP TLS, either rely on the shared listener (Patterns 1/2) or opt into Pattern 3.
+\end{itemize}
+\end{frame}
+
+\end{document}
