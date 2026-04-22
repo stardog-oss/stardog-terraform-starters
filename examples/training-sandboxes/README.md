@@ -28,17 +28,38 @@ terraform init
 terraform apply
 ```
 
-## Middleware (gateway) layer
+If you already have a separate training-sandboxes working tree with real `terraform.tfvars` files, link them into this example tree instead of copying them:
+
+```bash
+cd examples/training-sandboxes
+./link_tfvars.sh /path/to/your/training-sandboxes
+```
+
+The script maps the existing `middleware/terraform.tfvars` to `middleware-envoy/terraform.tfvars` so you can reuse the old Envoy middleware config without duplicating it.
+
+## Middleware (Envoy Gateway) layer
 Installs Envoy Gateway + cert-manager and prepares shared Gateway resources. Routes and certificates are created later by the Helm chart during labs.
 
 ```bash
-cd examples/training-sandboxes/middleware
+cd examples/training-sandboxes/middleware-envoy
 cp terraform.tfvars.example terraform.tfvars
 ./init_backend.sh
 terraform apply
 ```
 
-This layer reads the infra state and upgrades all students by default. Use `target_students` in `middleware/terraform.tfvars` to limit the scope.
+This layer reads the infra state and upgrades all students by default. Use `target_students` in `middleware-envoy/terraform.tfvars` to limit the scope.
+
+## Middleware (Cilium Gateway API) layer
+Installs cert-manager, enables Gateway API on an existing Cilium installation, and prepares shared Gateway resources with the same training-sandbox flow as the Envoy middleware example.
+
+```bash
+cd examples/training-sandboxes/middleware-cilium
+cp terraform.tfvars.example terraform.tfvars
+./init_backend.sh
+terraform apply
+```
+
+This variant requires the target AKS clusters to already run Cilium. The current `infra` example provisions AKS with `kubenet`, so this layer is intended for Cilium-enabled clusters rather than the default training-sandbox AKS shape.
 
 ## Stardog application layer
 Deploys Stardog into an existing sandbox AKS cluster using the shared ACR and the standalone Stardog Helm chart.

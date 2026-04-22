@@ -1,17 +1,26 @@
 locals {
-  automation_account_name_effective = var.existing_automation_account_name != null ? trimspace(var.existing_automation_account_name) : ""
+  automation_account_name_effective                = var.existing_automation_account_name != null ? trimspace(var.existing_automation_account_name) : ""
   automation_account_resource_group_name_effective = var.existing_automation_account_resource_group_name != null ? trimspace(var.existing_automation_account_resource_group_name) : ""
-  install_automation_modules = coalesce(var.install_automation_modules, false)
-  use_powershell72 = lower(var.runbook_type) == "powershell72"
+  install_automation_modules                       = coalesce(var.install_automation_modules, false)
+  use_powershell72                                 = lower(var.runbook_type) == "powershell72"
 
-  runbook_clean  = join("", regexall("[0-9a-z-]", lower("${var.cluster_name}-daily-stop")))
-  runbook_name   = substr(local.runbook_clean, 0, 49)
-  schedule_clean = join("", regexall("[0-9a-z-]", lower("${var.cluster_name}-stop-daily")))
-  schedule_name  = substr(local.schedule_clean, 0, 49)
-
-  stop_time_parts = [for p in split(":", var.daily_stop_time) : tonumber(p)]
-  stop_hour       = local.stop_time_parts[0]
-  stop_minute     = local.stop_time_parts[1]
+  runbook_clean = join("", regexall("[0-9a-z-]", lower("${var.cluster_name}-daily-stop")))
+  runbook_name  = substr(local.runbook_clean, 0, 49)
+  stop_schedule_specs = {
+    for t in var.daily_stop_times : replace(t, ":", "") => {
+      time = t
+      time_formatted = format(
+        "%02d:%02d:00",
+        tonumber(split(":", t)[0]),
+        tonumber(split(":", t)[1])
+      )
+      schedule_name = substr(
+        join("", regexall("[0-9a-z-]", lower("${var.cluster_name}-stop-daily-${replace(t, ":", "")}"))),
+        0,
+        49
+      )
+    }
+  }
 }
 
 resource "time_static" "schedule_anchor" {
@@ -20,22 +29,23 @@ resource "time_static" "schedule_anchor" {
 
 locals {
   schedule_start_date = var.enabled ? formatdate("YYYY-MM-DD", time_static.schedule_anchor[0].rfc3339) : null
-  stop_time_formatted = format("%02d:%02d:00", local.stop_hour, local.stop_minute)
 }
 
 data "external" "schedule_utc" {
-  count   = var.enabled ? 1 : 0
-  program = ["python3", "${path.module}/scripts/localtime_to_utc.py"]
+  for_each = var.enabled ? local.stop_schedule_specs : {}
+  program  = ["python3", "${path.module}/scripts/localtime_to_utc.py"]
 
   query = {
     date     = local.schedule_start_date
-    time     = local.stop_time_formatted
+    time     = each.value.time_formatted
     timezone = var.schedule_timezone
   }
 }
 
 locals {
-  schedule_start_time = var.enabled ? data.external.schedule_utc[0].result.utc_time : null
+  schedule_start_times = {
+    for key, value in data.external.schedule_utc : key => value.result.utc_time
+  }
 }
 
 data "azurerm_automation_account" "existing" {
@@ -122,23 +132,27 @@ resource "azurerm_automation_runbook" "stop_aks" {
 }
 
 resource "azurerm_automation_schedule" "daily_stop" {
-  count                   = var.enabled ? 1 : 0
-  name                    = local.schedule_name
+  for_each                = var.enabled ? local.stop_schedule_specs : {}
+  name                    = each.value.schedule_name
   resource_group_name     = local.automation_account_resource_group_name_effective
   automation_account_name = local.automation_account_name_effective
-  description             = "Daily stop of AKS at ${var.daily_stop_time} (${var.schedule_timezone})."
+  description             = "Daily stop of AKS at ${each.value.time} (${var.schedule_timezone})."
   frequency               = "Day"
   interval                = 1
   timezone                = var.schedule_timezone
-  start_time              = local.schedule_start_time
+  start_time              = local.schedule_start_times[each.key]
+
+  lifecycle {
+    ignore_changes = [start_time]
+  }
 }
 
 resource "azurerm_automation_job_schedule" "stop_aks" {
-  count                   = var.enabled ? 1 : 0
+  for_each                = var.enabled ? local.stop_schedule_specs : {}
   resource_group_name     = local.automation_account_resource_group_name_effective
   automation_account_name = local.automation_account_name_effective
   runbook_name            = azurerm_automation_runbook.stop_aks[0].name
-  schedule_name           = azurerm_automation_schedule.daily_stop[0].name
+  schedule_name           = azurerm_automation_schedule.daily_stop[each.key].name
 
   parameters = {
     resourcegroupname = var.resource_group_name

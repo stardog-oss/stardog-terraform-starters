@@ -8,7 +8,9 @@ locals {
   sparql_redirect_uris = concat(local.default_sparql_redirect_uris, var.extra_sparql_redirect_uris)
 
   launchpad_redirect_uris = [
-    "https://launchpad.${var.inst_id}.${var.dns_zone_name}/oauth/azure/redirect"
+    "http://localhost:49998/",
+    "http://localhost/",
+    "https://launchpad.${var.inst_id}.${var.dns_zone_name}/oauth/azure/redirect",
   ]
 }
 

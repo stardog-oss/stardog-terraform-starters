@@ -1,0 +1,38 @@
+subscription_id = "<azure-subscription-id>"
+tenant_id       = "<azure-tenant-id>"
+location        = "<azure-region>"
+name_prefix     = "training"
+
+tfstate_resource_group_name  = "<tfstate-resource-group>"
+tfstate_storage_account_name = "<tfstate-storage-account>"
+
+dns_zone_name                  = "training.example.com"
+dns_zone_resource_group        = "<dns-zone-resource-group>"
+create_student_dns_records     = true
+create_student_dns_root_record = false
+dns_record_ttl                 = 60
+
+invite_cc_email = "instructor@example.com" # only used if a student does not have a cc defined.
+students = {
+  student1 = { email = "student1@example.com", partners = ["partner1@example.com"] }
+  student2 = { email = "student2@example.com" }
+  student3 = { email = "student3@example.com", cc = "observer@example.com" }
+}
+
+# Import images/charts into the shared ACR -- adjust to deploy both previous and latest.
+import_images = true
+images_to_import = [
+  "stardog/stardog:<version>",
+  "stardog/launchpad:<version>",
+  "stardog/voicebox-service:<version>",
+]
+
+import_charts = true
+charts_to_import = [
+  "oci://<internal-or-public-registry>/charts/kube-stardog-stack:<version>"
+]
+
+aks_stop_daily_times          = ["21:00", "23:59"]
+aks_stop_schedule_timezone    = "America/Toronto"
+aks_stop_role_definition_name = "Azure Kubernetes Service Contributor Role"
+aks_stop_runbook_type         = "PowerShell"

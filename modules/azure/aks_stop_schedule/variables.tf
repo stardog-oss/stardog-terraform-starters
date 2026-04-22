@@ -52,13 +52,13 @@ variable "install_automation_modules" {
   default     = false
 }
 
-variable "daily_stop_time" {
-  description = "Local time (HH:MM, 24h) when the cluster should be stopped."
-  type        = string
-  default     = "20:00"
+variable "daily_stop_times" {
+  description = "Local times (HH:MM, 24h) when the cluster should be stopped."
+  type        = list(string)
+  default     = ["20:00"]
   validation {
-    condition     = can(regex("^\\d{2}:\\d{2}$", var.daily_stop_time))
-    error_message = "daily_stop_time must be in HH:MM format (24-hour clock)."
+    condition     = length(var.daily_stop_times) > 0 && alltrue([for t in var.daily_stop_times : can(regex("^\\d{2}:\\d{2}$", t))])
+    error_message = "daily_stop_times must contain one or more HH:MM values in 24-hour format."
   }
 }
 
@@ -71,7 +71,7 @@ variable "schedule_timezone" {
 variable "role_definition_name" {
   description = "Role assigned to the automation account so it can stop the AKS cluster."
   type        = string
-  default     = "Azure Kubernetes Service Cluster Admin Role"
+  default     = "Azure Kubernetes Service Contributor Role"
 }
 
 variable "runbook_type" {

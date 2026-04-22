@@ -1,10 +1,1 @@
-subscription_id = "<azure-subscription-id>"
-tenant_id       = "<azure-tenant-id>"
-location        = "<azure-region>"
-name_prefix     = "training"
-
-resource_group_name          = "<shared-resource-group>"
-tfstate_resource_group_name  = "<tfstate-resource-group>"
-tfstate_storage_account_name = "<tfstate-storage-account>"
-
-automation_account_name = "automation"
+../../../stacks/training-sandboxes/bootstrap/terraform.tfvars.example

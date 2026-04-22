@@ -1,11 +1,32 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+TFVARS_FILE=terraform.tfvars
+if [[ ! -f "${TFVARS_FILE}" && -f "terraform.tfvars.example" ]]; then
+  TFVARS_FILE=terraform.tfvars.example
+fi
+
+tfvars_value() {
+  local key=$1
+  awk -F'=' -v key="$key" '
+    $1 ~ ("^[[:space:]]*" key "[[:space:]]*$") {
+      gsub(/["[:space:]]/, "", $2)
+      print $2
+      exit
+    }
+  ' "${TFVARS_FILE}"
+}
+
+TF_BACKEND_RG=${TF_BACKEND_RG:-$(tfvars_value tfstate_resource_group_name)}
+TF_BACKEND_SA=${TF_BACKEND_SA:-$(tfvars_value tfstate_storage_account_name)}
+TF_BACKEND_CONTAINER=${TF_BACKEND_CONTAINER:-$(tfvars_value tfstate_container_name)}
 TF_BACKEND_RG=${TF_BACKEND_RG:-CHANGE_ME_RG}
 TF_BACKEND_SA=${TF_BACKEND_SA:-CHANGE_ME_SA}
 TF_BACKEND_CONTAINER=${TF_BACKEND_CONTAINER:-tfstate}
 
-NAME_PREFIX=$(grep -E '^\s*name_prefix\s*=' terraform.tfvars | head -n1 | awk -F'=' '{gsub(/["[:space:]]/, "", $2); print $2}')
+NAME_PREFIX=$(tfvars_value name_prefix)
+# Preserve the historical backend key so the example tree can reuse the
+# existing middleware state without requiring a state migration.
 KEY_DEFAULT="envs/${NAME_PREFIX:-training-sandboxes}/middleware/terraform.tfstate"
 KEY=${TF_BACKEND_KEY:-$KEY_DEFAULT}
 

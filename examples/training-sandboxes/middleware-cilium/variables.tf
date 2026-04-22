@@ -1,0 +1,1 @@
+../../../stacks/training-sandboxes/middleware-cilium/variables.tf

@@ -1,0 +1,1 @@
+../../../stacks/training-sandboxes/middleware-envoy/variables.tf
