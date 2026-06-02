@@ -5,19 +5,20 @@ variable "deploy" {
 }
 
 variable "namespace" {
-  description = "Kubernetes namespace where the temporary pods should run."
+  description = "Legacy no-op. Previously used as the Kubernetes namespace for temporary role-management pods."
   type        = string
 }
 
 variable "kubeconfig_path" {
-  description = "Path to the kubeconfig file used for kubectl commands."
+  description = "Legacy no-op. Previously used by kubectl-based role helpers."
   type        = string
   default     = "~/.kube/config"
 }
 
 variable "image" {
-  description = "Container image (including tag) for the stardog-manager CLI."
+  description = "Legacy no-op. Previously identified the stardog-manager helper image."
   type        = string
+  default     = null
 }
 
 variable "stardog_url" {
@@ -37,7 +38,7 @@ variable "stardog_password" {
 }
 
 variable "stardog_insecure" {
-  description = "If true, skip TLS verification when connecting to Stardog."
+  description = "Legacy no-op for the local Stardog CLI path. Configure local JVM trust if the public endpoint uses a private CA."
   type        = bool
   default     = false
 }
@@ -61,31 +62,55 @@ variable "remove_builtin_reader" {
 }
 
 variable "service_account_name" {
-  description = "Optional Kubernetes service account for the ephemeral pods."
+  description = "Legacy no-op. Previously used as the Kubernetes service account for temporary pods."
   type        = string
   default     = null
 }
 
 variable "extra_cli_args" {
-  description = "Additional CLI arguments to pass to stardog_ops.cli."
+  description = "Reserved for compatibility. The local stardog-admin implementation currently ignores these arguments."
   type        = list(string)
   default     = []
 }
 
 variable "container_env_extra" {
-  description = "Additional environment variables to inject into the ephemeral container."
+  description = "Additional environment variables carried for compatibility."
   type        = map(string)
   default     = {}
 }
 
 variable "local_exec_env" {
-  description = "Environment variables for the local kubectl command execution."
+  description = "Environment variables for local stardog-admin command execution."
   type        = map(string)
   default     = {}
 }
 
+variable "wait_for_stardog" {
+  description = "Wait for the Stardog public admin endpoint before creating roles."
+  type        = bool
+  default     = true
+}
+
+variable "stardog_ready_path" {
+  description = "HTTP path used to check Stardog readiness before creating roles."
+  type        = string
+  default     = "/admin/alive"
+}
+
+variable "stardog_ready_attempts" {
+  description = "Number of readiness attempts before failing role creation."
+  type        = number
+  default     = 60
+}
+
+variable "stardog_ready_interval_seconds" {
+  description = "Seconds to sleep between Stardog readiness attempts."
+  type        = number
+  default     = 10
+}
+
 variable "kubeconfig_refresh_command" {
-  description = "Optional shell command that ensures the kubeconfig points at the target cluster before running kubectl."
+  description = "Legacy no-op. Previously refreshed kubeconfig before running kubectl."
   type        = string
   default     = null
 }
