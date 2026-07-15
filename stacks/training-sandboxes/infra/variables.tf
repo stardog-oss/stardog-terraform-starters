@@ -176,6 +176,12 @@ variable "student_acr_role_definition_name" {
   default     = "AcrPush"
 }
 
+variable "student_acr_reader_role_definition_name" {
+  description = "Control-plane role assigned to students on the shared ACR so the registry is visible/readable in Azure."
+  type        = string
+  default     = "Reader"
+}
+
 variable "student_key_vault_role_definition_name" {
   description = "Role assigned to each student on their own Key Vault for secret read/write access."
   type        = string

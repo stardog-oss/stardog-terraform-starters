@@ -137,7 +137,10 @@ resource "azurerm_kubernetes_cluster" "this" {
     os_disk_size_gb      = var.system_os_disk_size_gb
     orchestrator_version = var.kubernetes_version
     type                 = "VirtualMachineScaleSets"
-    node_count           = var.system_count
+    auto_scaling_enabled = var.system_auto_scaling_enabled
+    node_count           = var.system_auto_scaling_enabled ? null : var.system_count
+    min_count            = var.system_auto_scaling_enabled ? var.system_min_count : null
+    max_count            = var.system_auto_scaling_enabled ? var.system_max_count : null
     upgrade_settings {
       drain_timeout_in_minutes      = 0
       max_surge                     = "10%"
@@ -193,6 +196,10 @@ resource "azurerm_kubernetes_cluster" "this" {
     precondition {
       condition     = var.enable_ingress_application_gateway ? (var.ingress_application_gateway_subnet_cidr != null && trimspace(var.ingress_application_gateway_subnet_cidr) != "") : true
       error_message = "Set ingress_application_gateway_subnet_cidr when enable_ingress_application_gateway is true."
+    }
+    precondition {
+      condition     = var.system_auto_scaling_enabled ? (var.system_min_count != null && var.system_max_count != null && var.system_min_count <= var.system_max_count) : true
+      error_message = "Set system_min_count and system_max_count when system_auto_scaling_enabled is true."
     }
   }
 }

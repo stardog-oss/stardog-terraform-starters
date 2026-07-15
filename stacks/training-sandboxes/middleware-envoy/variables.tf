@@ -47,6 +47,12 @@ variable "target_students" {
   default     = []
 }
 
+variable "target_groups" {
+  description = "Optional list of student group names to upgrade; empty means all. Matching is case-insensitive."
+  type        = list(string)
+  default     = []
+}
+
 variable "infra_kubeconfig_dir" {
   description = "Directory containing per-student kubeconfig files created by infra."
   type        = string
@@ -61,9 +67,9 @@ variable "enable_gateway_install" {
 
 
 variable "gateway_api_crds_version" {
-  description = "Gateway API CRDs version tag (e.g., v1.1.0)."
+  description = "Gateway API CRDs version tag. Keep this compatible with Envoy Gateway chart version."
   type        = string
-  default     = "v1.1.0"
+  default     = "v1.5.0"
 }
 
 variable "cert_manager_chart_version" {
@@ -73,9 +79,9 @@ variable "cert_manager_chart_version" {
 }
 
 variable "envoy_gateway_chart_version" {
-  description = "Optional Envoy Gateway chart version. Empty means default/latest."
+  description = "Envoy Gateway chart version. Pin this instead of floating latest so it stays compatible with Gateway API CRDs."
   type        = string
-  default     = ""
+  default     = "1.8.0"
 }
 
 variable "gateway_class_name" {

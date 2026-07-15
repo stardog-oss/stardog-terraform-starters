@@ -149,11 +149,27 @@ resource "azurerm_role_assignment" "student_acr_push_group" {
   principal_id         = azuread_group.tfstate_writers[0].object_id
 }
 
+resource "azurerm_role_assignment" "student_acr_reader_group" {
+  count = var.create_student_tfstate_group ? 1 : 0
+
+  scope                = module.acr_shared.id
+  role_definition_name = var.student_acr_reader_role_definition_name
+  principal_id         = azuread_group.tfstate_writers[0].object_id
+}
+
 resource "azurerm_role_assignment" "student_acr_push_user" {
   for_each = var.create_student_tfstate_group ? {} : local.students
 
   scope                = module.acr_shared.id
   role_definition_name = var.student_acr_role_definition_name
+  principal_id         = local.student_principal_ids[each.key]
+}
+
+resource "azurerm_role_assignment" "student_acr_reader_user" {
+  for_each = var.create_student_tfstate_group ? {} : local.students
+
+  scope                = module.acr_shared.id
+  role_definition_name = var.student_acr_reader_role_definition_name
   principal_id         = local.student_principal_ids[each.key]
 }
 

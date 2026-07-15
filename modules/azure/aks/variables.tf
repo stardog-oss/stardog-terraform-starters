@@ -72,8 +72,26 @@ variable "system_vm_size" {
 }
 
 variable "system_count" {
-  description = "Initial node count for the System node pool."
+  description = "Fixed or initial node count for the System node pool."
   type        = number
+}
+
+variable "system_auto_scaling_enabled" {
+  description = "Enable autoscaling for the System node pool."
+  type        = bool
+  default     = false
+}
+
+variable "system_min_count" {
+  description = "Minimum node count for the System node pool when autoscaling is enabled."
+  type        = number
+  default     = null
+}
+
+variable "system_max_count" {
+  description = "Maximum node count for the System node pool when autoscaling is enabled."
+  type        = number
+  default     = null
 }
 
 variable "system_os_disk_size_gb" {
