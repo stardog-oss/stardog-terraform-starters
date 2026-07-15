@@ -1,5 +1,9 @@
 locals {
-  effective_cli_args = concat(var.extra_cli_args, var.stardog_insecure ? ["--insecure-tls"] : [])
+  stardog_url_trimmed   = trimsuffix(trimspace(var.stardog_url), "/")
+  stardog_ready_path    = startswith(var.stardog_ready_path, "/") ? var.stardog_ready_path : "/${var.stardog_ready_path}"
+  stardog_ready_url     = "${local.stardog_url_trimmed}${local.stardog_ready_path}"
+  stardog_ready_url_esc = replace(local.stardog_ready_url, "'", "'\"'\"'")
+  curl_tls_args         = var.stardog_insecure ? "-k" : ""
 
   container_env_base = merge(
     {
@@ -40,39 +44,74 @@ locals {
   }
 }
 
+resource "null_resource" "wait_for_stardog" {
+  count = var.deploy && var.wait_for_stardog ? 1 : 0
+
+  triggers = {
+    url      = local.stardog_ready_url
+    attempts = tostring(var.stardog_ready_attempts)
+    interval = tostring(var.stardog_ready_interval_seconds)
+    insecure = tostring(var.stardog_insecure)
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/usr/bin/env", "bash", "-c"]
+    command     = <<-SCRIPT
+      set -euo pipefail
+
+      URL='${local.stardog_ready_url_esc}'
+      ATTEMPTS=${var.stardog_ready_attempts}
+      INTERVAL=${var.stardog_ready_interval_seconds}
+
+      for attempt in $(seq 1 "$ATTEMPTS"); do
+        if curl -fsS ${local.curl_tls_args} --connect-timeout 5 --max-time 15 "$URL" >/dev/null; then
+          echo "Stardog endpoint is ready: $URL"
+          exit 0
+        fi
+        echo "Waiting for Stardog endpoint $URL ($attempt/$ATTEMPTS)"
+        sleep "$INTERVAL"
+      done
+
+      echo "Stardog endpoint did not become ready: $URL" >&2
+      exit 1
+    SCRIPT
+  }
+}
+
 module "remove_builtin_reader" {
   count  = var.deploy && var.remove_builtin_reader ? 1 : 0
   source = "../role"
 
-  name                   = "reader"
-  state                  = "absent"
-  namespace              = var.namespace
-  kubeconfig_path        = var.kubeconfig_path
-  image                  = var.image
-  stardog_url            = var.stardog_url
-  additional_cli_args    = local.effective_cli_args
-  container_env          = local.container_env_base
-  local_exec_env         = var.local_exec_env
-  service_account_name   = var.service_account_name
-  destroy_on_deprovision = true
+  name                       = "reader"
+  state                      = "absent"
+  namespace                  = var.namespace
+  kubeconfig_path            = var.kubeconfig_path
+  image                      = var.image
+  stardog_url                = var.stardog_url
+  additional_cli_args        = var.extra_cli_args
+  container_env              = local.container_env_base
+  local_exec_env             = var.local_exec_env
+  service_account_name       = var.service_account_name
+  destroy_on_deprovision     = true
   kubeconfig_refresh_command = var.kubeconfig_refresh_command
+  depends_on                 = [null_resource.wait_for_stardog]
 }
 
 module "roles" {
   for_each = var.deploy ? var.roles : {}
   source   = "../role"
 
-  name                   = each.key
-  namespace              = var.namespace
-  kubeconfig_path        = var.kubeconfig_path
-  image                  = var.image
-  stardog_url            = var.stardog_url
-  additional_cli_args    = local.effective_cli_args
-  container_env          = local.container_env_base
-  local_exec_env         = var.local_exec_env
-  service_account_name   = var.service_account_name
-  destroy_on_deprovision = false
-  depends_on             = [module.remove_builtin_reader]
+  name                       = each.key
+  namespace                  = var.namespace
+  kubeconfig_path            = var.kubeconfig_path
+  image                      = var.image
+  stardog_url                = var.stardog_url
+  additional_cli_args        = var.extra_cli_args
+  container_env              = local.container_env_base
+  local_exec_env             = var.local_exec_env
+  service_account_name       = var.service_account_name
+  destroy_on_deprovision     = false
+  depends_on                 = [null_resource.wait_for_stardog, module.remove_builtin_reader]
   kubeconfig_refresh_command = var.kubeconfig_refresh_command
 }
 
@@ -87,14 +126,14 @@ module "assignments" {
   state             = coalesce(each.value.state, "present")
   idempotent_create = coalesce(each.value.idempotent, false)
 
-  namespace            = var.namespace
-  kubeconfig_path      = var.kubeconfig_path
-  image                = var.image
-  stardog_url          = var.stardog_url
-  additional_cli_args  = local.effective_cli_args
-  container_env        = local.container_env_base
-  local_exec_env       = var.local_exec_env
-  service_account_name = var.service_account_name
+  namespace                  = var.namespace
+  kubeconfig_path            = var.kubeconfig_path
+  image                      = var.image
+  stardog_url                = var.stardog_url
+  additional_cli_args        = var.extra_cli_args
+  container_env              = local.container_env_base
+  local_exec_env             = var.local_exec_env
+  service_account_name       = var.service_account_name
   kubeconfig_refresh_command = var.kubeconfig_refresh_command
 
   depends_on = [module.roles]

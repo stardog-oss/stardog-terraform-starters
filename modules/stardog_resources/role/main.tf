@@ -1,76 +1,100 @@
 locals {
-  normalized_state      = lower(trimspace(var.state))
-  name_hash             = substr(sha256(var.name), 0, 8)
-  base_pod_name         = substr("stardog-role-${local.name_hash}", 0, 40)
-  pod_name              = substr("${local.base_pod_name}-${substr(local.spec_present_hash, 0, 6)}", 0, 56)
-  pod_name_escaped      = replace(local.pod_name, "'", "'\"'\"'")
-  kubeconfig_raw_path   = trimspace(replace(var.kubeconfig_path, "\\", "/"))
-  kubeconfig_arg        = "--kubeconfig=$KCFG"
-  kubeconfig_flag       = "--kubeconfig=\"$KCFG\""
-  kubeconfig_resolve_command = format("KCFG=\"$(eval echo %s)\"", local.kubeconfig_raw_path)
-  spec_present_json = jsonencode(merge({
-    role  = var.name
-    state = local.normalized_state
-  }, var.stardog_url != null ? { stardog_url = var.stardog_url } : {}))
+  normalized_state = lower(trimspace(var.state))
 
-  spec_absent_json = jsonencode(merge({
-    role  = var.name
-    state = "absent"
-  }, var.stardog_url != null ? { stardog_url = var.stardog_url } : {}))
+  role_name         = trimspace(var.name)
+  role_name_escaped = replace(local.role_name, "'", "'\"'\"'")
+  server_raw        = trimspace(var.stardog_url)
+  server_url = (
+    length(regexall("^https://[^/:]+(/.*)?$", local.server_raw)) > 0 ?
+    replace(local.server_raw, "/^https://([^/:]+)(.*)$/", "https://$1:443$2") :
+    local.server_raw
+  )
+  server_escaped = replace(local.server_url, "'", "'\"'\"'")
+
+  username = try(var.container_env["STARDOG_USERNAME"], "")
+  password = try(var.container_env["STARDOG_PASSWORD"], "")
+
+  username_escaped = replace(local.username, "'", "'\"'\"'")
+  password_escaped = replace(local.password, "'", "'\"'\"'")
+
+  spec_present_json = jsonencode({
+    role        = local.role_name
+    state       = local.normalized_state
+    stardog_url = local.server_url
+  })
+
+  spec_absent_json = jsonencode({
+    role        = local.role_name
+    state       = "absent"
+    stardog_url = local.server_url
+  })
 
   spec_present_hash = sha256(local.spec_present_json)
   spec_absent_hash  = sha256(local.spec_absent_json)
 
-  namespace_escaped  = replace(var.namespace, "'", "'\"'\"'")
-  image_escaped      = replace(var.image, "'", "'\"'\"'")
-
-  base_args = [
-    "kubectl",
-    local.kubeconfig_arg,
-    "-n",
-    format("'%s'", local.namespace_escaped),
-    "run",
-    format("'%s'", local.pod_name_escaped),
-    "--image",
-    format("'%s'", local.image_escaped),
-    "--restart=Never",
-    "--rm",
-    "--attach",
-  ]
-
-  service_account_arg = var.service_account_name != null ? [
-    format("--serviceaccount='%s'", replace(var.service_account_name, "'", "'\"'\"'"))
-  ] : []
-
-  env_args = [for k, v in var.container_env : format("--env='%s'", replace(format("%s=%s", k, v), "'", "'\"'\"'"))]
-
-  cli_args_list = concat(
-    ["--spec-file=/tmp/spec.json"],
-    var.skip_status ? ["--skip-status"] : [],
-    var.additional_cli_args,
-  )
-
-  cli_args_quoted = [for arg in local.cli_args_list : format("'%s'", replace(arg, "'", "'\"'\"'"))]
-  cli_arg_string  = join(" ", local.cli_args_quoted)
-
-  spec_present_b64        = base64encode(local.spec_present_json)
-  spec_present_b64_escape = replace(local.spec_present_b64, "'", "'\"'\"'")
-
-  spec_absent_b64        = base64encode(local.spec_absent_json)
-  spec_absent_b64_escape = replace(local.spec_absent_b64, "'", "'\"'\"'")
-
   ensure_script = <<-SCRIPT
-    #!/bin/sh
     set -euo pipefail
-    echo '${local.spec_present_b64_escape}' | base64 -d >/tmp/spec.json
-    python -m stardog_ops.cli ${local.cli_arg_string}
+
+    ROLE='${local.role_name_escaped}'
+    STARDOG_SERVER='${local.server_escaped}'
+    STARDOG_USERNAME='${local.username_escaped}'
+    STARDOG_PASSWORD='${local.password_escaped}'
+
+    role_exists() {
+      stardog-admin --server "$STARDOG_SERVER" role list -u "$STARDOG_USERNAME" -p "$STARDOG_PASSWORD" | awk -F'|' -v role="$ROLE" '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); if ($2 == role) found = 1 } END { exit(found ? 0 : 1) }'
+    }
+
+    wait_for_role() {
+      for attempt in $(seq 1 12); do
+        if role_exists; then
+          return 0
+        fi
+        sleep 1
+      done
+      echo "Stardog role '$ROLE' was not visible after creation" >&2
+      return 1
+    }
+
+    case '${local.normalized_state}' in
+      present)
+        if role_exists; then
+          echo "Stardog role '$ROLE' already exists"
+        else
+          stardog-admin --server "$STARDOG_SERVER" role add -u "$STARDOG_USERNAME" -p "$STARDOG_PASSWORD" -- "$ROLE"
+          wait_for_role
+        fi
+        ;;
+      absent)
+        if role_exists; then
+          stardog-admin --server "$STARDOG_SERVER" role remove --force -u "$STARDOG_USERNAME" -p "$STARDOG_PASSWORD" -- "$ROLE"
+        else
+          echo "Stardog role '$ROLE' is already absent"
+        fi
+        ;;
+      *)
+        echo "Unsupported role state: ${local.normalized_state}" >&2
+        exit 1
+        ;;
+    esac
   SCRIPT
 
   destroy_script = <<-SCRIPT
-    #!/bin/sh
     set -euo pipefail
-    echo '${local.spec_absent_b64_escape}' | base64 -d >/tmp/spec.json
-    python -m stardog_ops.cli ${local.cli_arg_string}
+
+    ROLE='${local.role_name_escaped}'
+    STARDOG_SERVER='${local.server_escaped}'
+    STARDOG_USERNAME='${local.username_escaped}'
+    STARDOG_PASSWORD='${local.password_escaped}'
+
+    role_exists() {
+      stardog-admin --server "$STARDOG_SERVER" role list -u "$STARDOG_USERNAME" -p "$STARDOG_PASSWORD" | awk -F'|' -v role="$ROLE" '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); if ($2 == role) found = 1 } END { exit(found ? 0 : 1) }'
+    }
+
+    if role_exists; then
+      stardog-admin --server "$STARDOG_SERVER" role remove --force -u "$STARDOG_USERNAME" -p "$STARDOG_PASSWORD" -- "$ROLE"
+    else
+      echo "Stardog role '$ROLE' is already absent"
+    fi
   SCRIPT
 
   ensure_script_b64        = base64encode(local.ensure_script)
@@ -79,77 +103,22 @@ locals {
   destroy_script_b64        = base64encode(local.destroy_script)
   destroy_script_b64_escape = replace(local.destroy_script_b64, "'", "'\"'\"'")
 
-  pod_run_command = join(
-    " ",
-    concat(
-      local.base_args,
-      local.service_account_arg,
-      local.env_args,
-      [
-        "--command",
-        "--",
-        "/bin/sh",
-        "-c",
-      ],
-    )
+  ensure_command = format(
+    "echo '%s' | base64 -d | /usr/bin/env bash",
+    local.ensure_script_b64_escape,
   )
 
-  ensure_container_command = replace(
-    format(
-      "echo '%s' | base64 -d > /tmp/run.sh && chmod +x /tmp/run.sh && /tmp/run.sh",
-      local.ensure_script_b64_escape
-    ),
-    "\"",
-    "\\\""
+  destroy_command = format(
+    "echo '%s' | base64 -d | /usr/bin/env bash",
+    local.destroy_script_b64_escape,
   )
 
-  destroy_container_command = replace(
-    format(
-      "echo '%s' | base64 -d > /tmp/run.sh && chmod +x /tmp/run.sh && /tmp/run.sh",
-      local.destroy_script_b64_escape
-    ),
-    "\"",
-    "\\\""
-  )
-
-  pre_delete_command = format(
-    "kubectl %s -n '%s' delete pod '%s' --ignore-not-found --wait=false >/dev/null 2>&1 || true",
-    local.kubeconfig_flag,
-    local.namespace_escaped,
-    local.pod_name_escaped,
-  )
-
-  refresh_command = trimspace(coalesce(var.kubeconfig_refresh_command, ""))
-  refresh_parts   = length(local.refresh_command) > 0 ? [local.refresh_command] : []
-  kubeconfig_parts = [local.kubeconfig_resolve_command]
-
-  kubeconfig_check_command = "if [ ! -s \"$KCFG\" ]; then echo \"Kubeconfig file missing or empty: $KCFG\" >&2; exit 1; fi"
-
-  kubeconfig_ready_command = format(
-    "ready=0; for attempt in $(seq 1 20); do if kubectl %s api-resources >/dev/null 2>&1; then ready=1; break; fi; echo \"Waiting for Kubernetes API discovery... ($attempt/20)\"; sleep 10; done; if [ \"$ready\" -ne 1 ]; then echo \"Kubernetes API discovery failed after multiple attempts; cluster is not ready yet.\" >&2; exit 1; fi",
-    local.kubeconfig_flag,
-  )
-
-  ensure_command  = join(" && ", concat(local.kubeconfig_parts, local.refresh_parts, [local.kubeconfig_check_command, local.kubeconfig_ready_command, "${local.pod_run_command} \"${local.ensure_container_command}\""]))
-
-  destroy_wrapper = format(
-    "if kubectl %s get namespace '%s' >/dev/null 2>&1; then %s; else echo \"Namespace %s not found; skipping role cleanup\"; fi",
-    local.kubeconfig_flag,
-    local.namespace_escaped,
-    "${local.pod_run_command} \"${local.destroy_container_command}\"",
-    local.namespace_escaped,
-  )
-
-  destroy_command = join(" && ", concat(local.kubeconfig_parts, local.refresh_parts, [local.destroy_wrapper]))
   destroy_command_effective = var.destroy_on_deprovision ? local.destroy_command : "true"
 }
 
 resource "null_resource" "role" {
   triggers = {
     spec_hash       = local.spec_present_hash
-    image           = var.image
-    namespace       = var.namespace
-    kubeconfig      = var.kubeconfig_path
     ensure_command  = local.ensure_command
     destroy_command = local.destroy_command_effective
     local_exec_env  = jsonencode(var.local_exec_env)

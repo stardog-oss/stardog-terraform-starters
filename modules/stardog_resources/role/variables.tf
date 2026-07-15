@@ -4,19 +4,20 @@ variable "name" {
 }
 
 variable "namespace" {
-  description = "Kubernetes namespace where the temporary pod should run."
+  description = "Legacy no-op. Previously used as the Kubernetes namespace for a temporary role-management pod."
   type        = string
 }
 
 variable "kubeconfig_path" {
-  description = "Path to the kubeconfig file used for kubectl commands."
+  description = "Legacy no-op. Previously used by kubectl-based role helpers."
   type        = string
   default     = "~/.kube/config"
 }
 
 variable "image" {
-  description = "Container image (including tag) for the stardog-manager CLI."
+  description = "Legacy no-op. Previously identified the stardog-manager helper image."
   type        = string
+  default     = null
 }
 
 variable "stardog_url" {
@@ -42,7 +43,7 @@ variable "skip_status" {
 }
 
 variable "additional_cli_args" {
-  description = "Additional CLI arguments to pass to stardog_ops.cli."
+  description = "Reserved for compatibility. The local stardog-admin implementation currently ignores these arguments."
   type        = list(string)
   default     = []
 }
@@ -54,25 +55,25 @@ variable "destroy_on_deprovision" {
 }
 
 variable "container_env" {
-  description = "Environment variables to inject into the ephemeral container (e.g., STARDOG_USERNAME)."
+  description = "Environment variables carrying Stardog credentials. STARDOG_USERNAME and STARDOG_PASSWORD are used by local stardog-admin commands."
   type        = map(string)
   default     = {}
 }
 
 variable "local_exec_env" {
-  description = "Environment variables for the local kubectl command execution."
+  description = "Environment variables for local stardog-admin command execution."
   type        = map(string)
   default     = {}
 }
 
 variable "service_account_name" {
-  description = "Optional service account for the ephemeral pod."
+  description = "Legacy no-op. Previously used as the Kubernetes service account for a temporary pod."
   type        = string
   default     = null
 }
 
 variable "kubeconfig_refresh_command" {
-  description = "Optional shell command to run before invoking kubectl (e.g., az aks get-credentials)."
+  description = "Legacy no-op. Previously refreshed kubeconfig before invoking kubectl."
   type        = string
   default     = null
 }

@@ -1,6 +1,6 @@
 # Stardog Role Set
 
-Manages a collection of Stardog roles and permission assignments via the `stardog_ops` CLI, orchestrated through ephemeral Kubernetes pods.
+Manages a collection of Stardog roles and permission assignments by running the local `stardog-admin` CLI against a Stardog admin endpoint.
 
 ## Features
 - Creates or updates multiple roles and their permissions in one place.
@@ -11,19 +11,23 @@ Manages a collection of Stardog roles and permission assignments via the `stardo
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `deploy` | `bool` | `true` | Enable or disable management of roles/assignments. |
-| `namespace` | `string` | n/a | Kubernetes namespace for the temporary pods. |
-| `kubeconfig_path` | `string` | `"~/.kube/config"` | Kubeconfig used by `kubectl`. |
-| `image` | `string` | n/a | Container image containing the `stardog_ops` CLI. |
+| `namespace` | `string` | n/a | Legacy no-op retained for compatibility. |
+| `kubeconfig_path` | `string` | `"~/.kube/config"` | Legacy no-op retained for compatibility. |
+| `image` | `string` | `null` | Legacy no-op retained for compatibility. |
 | `stardog_url` | `string` | n/a | Stardog admin endpoint URL. |
 | `stardog_username` | `string` | n/a | Stardog admin username. |
 | `stardog_password` | `string` | n/a | Stardog admin password. |
-| `stardog_insecure` | `bool` | `false` | Skip TLS verification when contacting Stardog. |
+| `stardog_insecure` | `bool` | `false` | Legacy no-op for this local CLI path. Configure local JVM trust for private CAs. |
 | `roles` | `map(list(object({ action = string, resource_type = string, resource = string, state = optional(string), idempotent = optional(bool) })))` | `{}` | Map of role name to permission list. |
 | `remove_builtin_reader` | `bool` | `true` | Remove the default `reader` role prior to applying custom roles. |
-| `service_account_name` | `string` | `null` | Service account for the ephemeral pods. |
-| `extra_cli_args` | `list(string)` | `[]` | Additional CLI arguments passed to `stardog_ops`. |
-| `container_env_extra` | `map(string)` | `{}` | Additional environment variables for the container. |
-| `local_exec_env` | `map(string)` | `{}` | Environment variables for the local `kubectl` command. |
+| `service_account_name` | `string` | `null` | Legacy no-op retained for compatibility. |
+| `extra_cli_args` | `list(string)` | `[]` | Reserved for compatibility. |
+| `container_env_extra` | `map(string)` | `{}` | Additional environment variables carried for compatibility. |
+| `local_exec_env` | `map(string)` | `{}` | Environment variables for local `stardog-admin` execution. |
+| `wait_for_stardog` | `bool` | `true` | Wait for the Stardog public admin endpoint before creating roles. |
+| `stardog_ready_path` | `string` | `"/admin/alive"` | HTTP path used for the readiness check. |
+| `stardog_ready_attempts` | `number` | `60` | Number of readiness attempts before failing. |
+| `stardog_ready_interval_seconds` | `number` | `10` | Seconds between readiness attempts. |
 
 ## Outputs
 This module does not export outputs; downstream modules can rely on the side effects (roles/assignments in Stardog).
@@ -33,8 +37,7 @@ This module does not export outputs; downstream modules can rely on the side eff
 module "stardog_roles" {
   source            = "../../modules/stardog_resources/role_set"
   namespace         = "stardog"
-  image             = module.stardog_manager_image.image_uri
-  stardog_url       = "https://stardog.${local.ingress_dns_root}"
+  stardog_url       = "https://sparql.${local.ingress_dns_root}"
   stardog_username  = var.stardog_admin_username
   stardog_password  = var.stardog_admin_password
 

@@ -4,13 +4,13 @@ output "role_name" {
 }
 
 output "apply_command" {
-  description = "Kubectl command used to ensure the role (for debugging)."
+  description = "Local stardog-admin command used to ensure the role (for debugging)."
   value       = local.ensure_command
   sensitive   = true
 }
 
 output "destroy_command" {
-  description = "Kubectl command used to remove the role (for debugging)."
+  description = "Local stardog-admin command used to remove the role (for debugging)."
   value       = local.destroy_command
   sensitive   = true
 }

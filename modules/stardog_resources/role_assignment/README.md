@@ -1,12 +1,11 @@
 # Stardog Role Assignment module
 
-Creates or deletes a single Stardog role permission assignment by running the `stardog-manager` container inside the target cluster. The module mirrors the flow used by `modules/stardog_resources/role`, but writes a spec that includes `action`, `resource_type`, and `resource`, so the CLI performs a role-assignment reconciliation.
+Creates or deletes a single Stardog role permission assignment by running the local `stardog-admin` CLI against a Stardog admin endpoint.
 
 ## Requirements
 
-* `kubectl` on the Terraform host.
-* Access to the `stardog-manager` image that ships the `stardog_ops` CLI.
-* `pystardog` bundled in the image (already true for the repo image).
+* `stardog-admin` on the Terraform host.
+* Network access from the Terraform host to `stardog_url`.
 
 ## Inputs
 
@@ -17,25 +16,24 @@ Creates or deletes a single Stardog role permission assignment by running the `s
 | `resource_type` | Stardog resource type (e.g. `db`, `dbms_admin`, `all`). | `string` | n/a |
 | `resource` | Resource identifier or wildcard (e.g. `*`, `backup-all`, `db:mydb`). | `string` | n/a |
 | `state` | `present` to grant, `absent` to revoke. | `string` | `present` |
-| `namespace` | Kubernetes namespace for the ephemeral pod. | `string` | n/a |
-| `kubeconfig_path` | Kubeconfig path for `kubectl`. | `string` | `~/.kube/config` |
-| `image` | Fully-qualified `stardog-manager` image reference. | `string` | n/a |
+| `namespace` | Legacy no-op retained for compatibility. | `string` | n/a |
+| `kubeconfig_path` | Legacy no-op retained for compatibility. | `string` | `~/.kube/config` |
+| `image` | Legacy no-op retained for compatibility. | `string` | `null` |
 | `stardog_url` | Override Stardog admin endpoint (falls back to spec/CLI default). | `string` | `null` |
-| `skip_status` | Skip status ConfigMap writes (CLI prints JSON to stdout). | `bool` | `true` |
-| `idempotent_create` | Pass `--idempotent-create` to the CLI and set `idempotent=true` in the spec. | `bool` | `false` |
+| `skip_status` | Legacy no-op retained for compatibility. | `bool` | `true` |
+| `idempotent_create` | Preserved in the resource hash for compatibility. | `bool` | `false` |
 | `additional_spec_fields` | Map merged into the spec JSON (last-wins). | `map(any)` | `{}` |
-| `additional_cli_args` | Extra CLI flags appended after defaults. | `list(string)` | `[]` |
-| `container_env` | Environment variables injected into the container (typically credentials). | `map(string)` | `{}` |
-| `local_exec_env` | Environment variables for the local `kubectl` call. | `map(string)` | `{}` |
-| `service_account_name` | Optional service account for the temporary pod. | `string` | `null` |
+| `additional_cli_args` | Reserved for compatibility. | `list(string)` | `[]` |
+| `container_env` | Environment variables carrying Stardog credentials. | `map(string)` | `{}` |
+| `local_exec_env` | Environment variables for local `stardog-admin` execution. | `map(string)` | `{}` |
+| `service_account_name` | Legacy no-op retained for compatibility. | `string` | `null` |
 | `destroy_on_deprovision` | Whether to revoke the assignment during Terraform destroy. | `bool` | `true` |
 
 ## Behaviour
 
-* Apply-time: writes a spec with the requested state, base64-encodes it, and invokes `python -m stardog_ops.cli --spec-file=/tmp/spec.json …`.
-* Status reporting mirrors `modules/stardog_resources/role`: when `skip_status = true` the CLI prints status to stdout only; provide `--output-configmap` (via module inputs) if you need Kubernetes status objects.
+* Apply-time: ensures the role exists when granting, then runs `stardog-admin role grant`.
+* Permission state checks use `stardog-admin role permission` before grant or revoke.
 * Destroy-time: defaults to running the same command with `state = "absent"` so the grant is revoked. Set `destroy_on_deprovision = false` to skip the destroy phase.
-* Pod names are derived from a hash of the role/action/resource tuple and the spec hash to keep them unique but short.
 
 ## Example
 
@@ -46,10 +44,7 @@ module "writer_write_all" {
   action            = "write"
   resource_type     = "all"
   resource          = "*"
-  namespace         = var.stardog_namespace
-  kubeconfig_path   = var.kubeconfig_path
-  image             = module.stardog_manager_image.image_uri
-  stardog_url       = local.stardog_internal_service_url
+  stardog_url       = "https://stardog.${local.ingress_dns_root}"
   container_env = {
     STARDOG_USERNAME = var.stardog_admin_username
     STARDOG_PASSWORD = var.stardog_admin_password
