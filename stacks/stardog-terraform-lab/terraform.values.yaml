@@ -1,0 +1,113 @@
+global:
+  stardog:
+    enabled: true
+  bi:
+    enabled: false
+  zookeeper:
+    enabled: true
+  launchpad:
+    enabled: true
+  voicebox:
+    enabled: true
+  gateway:
+    enabled: true
+    createGateway: false
+    namespace: envoy-gateway
+    sparqlSectionName: https
+    sparqlHttpSectionName: http
+    launchpadSectionName: https
+    launchpadHttpSectionName: http
+    tls:
+      enabled: true
+  certIssuer:
+    enabled: true
+    type: acme
+    acme:
+      email: "training@stardog.com"
+
+stardog:
+  cluster:
+    enabled: true
+    replicaCount: 3
+
+  resources:
+    requests:
+      cpu: "3"
+      memory: "12Gi"
+    limits:
+      cpu: "3.2"
+      memory: "12.5Gi"
+
+  jvm:
+    minHeap: "10g"
+    maxHeap: "10g"
+    directMem: "1g"
+
+  nodeSelector:
+    target: stardog
+
+  tolerations:
+    - key: workload
+      value: "stardog"
+      effect: NoSchedule
+
+  image:
+    repository: "stardog/stardog"
+
+  upgrade:
+    approval:
+      targetVersion: "12.0.2"
+
+  jwtConfig:
+    enabled: true
+    issuers:
+      - roleMappingSource: token
+        usernameTemplates:
+          - "{preferred_username}"
+          - "{sub}"
+        autoCreateUsers: true
+        rolesClaimPath: roles
+        algorithms:
+          - name: RS256
+
+launchpad:
+  image:
+    repository: "stardog/launchpad"
+  environmentVariables:
+    AZURE_AUTH_ENABLED: "true"
+    SSOCONNECTION_MSENTRA_AZURE_DISPLAY_NAME: "MS Entra ID Stardog endpoint"
+
+voicebox:
+  image:
+    repository: "stardog/voicebox-service"
+
+  environmentVariables:
+    VBX_CONFIG_FILE: /voicebox-config/vbx_config.json
+    TMPDIR: /tmp
+    PRODUCTION: "1"
+
+  bitesService:
+    enabled: true
+    sparkApplication:
+      persistentVolumeClaim:
+        storageClassName: azurefile-csi
+      timeToLiveSeconds: 600
+      driver:
+        cores: 1
+        coreLimit: "1000m"
+        memory: "2g"
+      executor:
+        cores: 1
+        instances: 1
+        memory: "2g"
+    image:
+      repository: "stardog/voicebox-bites"
+
+zookeeper:
+  nodeSelector:
+    target: zookeeper
+
+  tolerations:
+    - key: workload
+      value: "zookeeper"
+      effect: NoSchedule

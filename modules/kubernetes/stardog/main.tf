@@ -138,9 +138,17 @@ locals {
     ? max(0, local.stardog_available_cpu_m_raw - local.total_reserved_cpu_m)
     : null
   )
-  stardog_available_cpu_string = local.stardog_available_cpu_m != null && local.stardog_available_cpu_m > 0 ? format("%dm", local.stardog_available_cpu_m) : null
+  stardog_available_cpu_string = (
+    local.stardog_available_cpu_m == null ? null :
+    local.stardog_available_cpu_m <= 0 ? null :
+    format("%dm", local.stardog_available_cpu_m)
+  )
 
-  stardog_available_cpu_cores = local.stardog_available_cpu_m != null && local.stardog_available_cpu_m > 0 ? local.stardog_available_cpu_m / 1000 : null
+  stardog_available_cpu_cores = (
+    local.stardog_available_cpu_m == null ? null :
+    local.stardog_available_cpu_m <= 0 ? null :
+    local.stardog_available_cpu_m / 1000
+  )
 
   stardog_allocatable_memory_bytes = (
     length(local.stardog_memory_bytes) > 0
@@ -199,10 +207,13 @@ locals {
     }
   ]
 
-  stardog_memory_profile_candidates = local.stardog_available_memory_bytes != null && local.stardog_available_memory_bytes > 0 ? [
-    for profile in local.stardog_memory_profiles : profile
-    if profile.max_bytes == null || local.stardog_available_memory_bytes <= profile.max_bytes
-  ] : []
+  stardog_memory_profile_candidates = (
+    local.stardog_available_memory_bytes == null ? [] :
+    local.stardog_available_memory_bytes <= 0 ? [] : [
+      for profile in local.stardog_memory_profiles : profile
+      if profile.max_bytes == null || local.stardog_available_memory_bytes <= profile.max_bytes
+    ]
+  )
 
   stardog_selected_memory_profile = length(local.stardog_memory_profile_candidates) > 0 ? local.stardog_memory_profile_candidates[0] : null
   stardog_jvm_heap_string         = local.stardog_selected_memory_profile != null ? format("%dg", local.stardog_selected_memory_profile.heap_gib) : null
