@@ -22,10 +22,8 @@ Creates an Amazon Elastic Container Registry repository, optional lifecycle/poli
 | `repository_policy_json` | `string` | `null` | Custom repository policy JSON. |
 | `pull_principal_arns` | `list(string)` | `[]` | Principal ARNs granted pull access when `repository_policy_json` is not provided. |
 | `tags` | `map(string)` | `{}` | Tags applied to the repository. |
-| `source_registry_url` | `string` | `"docker.io"` | Source registry host for image imports. |
-| `source_registry_username` | `string` | `null` | Username for source registry authentication. |
+| `source_registry_username` | `string` | `null` | Username for source registry authentication - only applied to images whose own parsed registry (from the image string itself) isn't the default docker.io. |
 | `source_registry_password` | `string` | `null` | Password/token for source registry authentication. |
-| `source_registry_allow_anonymous_fallback` | `bool` | `true` | Allow anonymous pull if authentication fails. |
 | `import_images` | `bool` | `false` | Mirror images from the source registry when `true`. |
 | `images_to_import` | `list(string)` | `[]` | List of `<repo>:<tag>` entries to mirror into ECR. |
 
