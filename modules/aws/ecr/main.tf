@@ -126,11 +126,20 @@ resource "skopeo2_copy" "import" {
     # pulling the plain Docker Hub images alongside it.
     login_username = local.import_source_registry[each.value] != "docker.io" ? var.source_registry_username : null
     login_password = local.import_source_registry[each.value] != "docker.io" ? var.source_registry_password : null
+    # Explicit, writable path - the underlying containers/image library still writes a scratch auth
+    # file even though credentials are passed inline above, and its own default
+    # (${XDG_RUNTIME_DIR}/containers/auth.json, falling back to /run/containers/...) failed live
+    # with "mkdir /run/containers: read-only file system" under tofu-controller's runner pod, which
+    # runs with a read-only root filesystem. Keyed per-instance (not a single shared path) since
+    # Terraform applies resources concurrently by default and source/destination carry different
+    # credentials - a shared path would race.
+    registry_auth_file = "/tmp/skopeo-auth-src-${replace(each.value, "/[^a-zA-Z0-9]/", "-")}.json"
   }
 
   destination {
-    image          = "docker://${aws_ecr_repository.this.repository_url}:${local.import_tag[each.value]}"
-    login_username = "AWS"
-    login_password = data.aws_ecr_authorization_token.this[0].password
+    image               = "docker://${aws_ecr_repository.this.repository_url}:${local.import_tag[each.value]}"
+    login_username       = "AWS"
+    login_password       = data.aws_ecr_authorization_token.this[0].password
+    registry_auth_file   = "/tmp/skopeo-auth-dest-${replace(each.value, "/[^a-zA-Z0-9]/", "-")}.json"
   }
 }

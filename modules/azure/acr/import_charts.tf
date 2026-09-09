@@ -39,6 +39,27 @@ locals {
     for chart, no_scheme in local.acr_import_chart_source_no_scheme :
     chart => element(split("/", no_scheme), length(split("/", no_scheme)) - 1)
   }
+  # jsonencode/jsondecode round-trip, same fix and full rationale as import_images.tf's own
+  # acr_import_body_json - conditionally including "credentials" as a plain HCL object attribute
+  # hit a real live bug there (Azure's importImage API rejects a present-but-null-fielded
+  # credentials object). No per-chart credential variation exists here today (jfrog_registry_
+  # password is one global value, not keyed per chart), so every instance would take the same
+  # branch - but routing through JSON here too keeps both azapi_resource_action bodies in this
+  # file consistent and safe against that bug class if per-chart credentials are ever added.
+  acr_import_chart_body_json = {
+    for chart, no_scheme in local.acr_import_chart_source_no_scheme : chart => jsonencode({
+      source = {
+        registryUri = split("/", no_scheme)[0]
+        sourceImage = trimprefix(no_scheme, "${split("/", no_scheme)[0]}/")
+        credentials = var.jfrog_registry_password != "" ? {
+          username = var.jfrog_registry_username
+          password = var.jfrog_registry_password
+        } : null
+      }
+      targetTags = ["charts/${local.acr_import_chart_name_version[chart]}"]
+      mode       = "Force"
+    })
+  }
 }
 
 # Calls ACR's own importImage ARM action directly - see import_images.tf for the full rationale
@@ -58,22 +79,7 @@ resource "azapi_resource_action" "acr_import_charts" {
   action      = "importImage"
   method      = "POST"
 
-  body = {
-    source = merge(
-      {
-        registryUri = split("/", local.acr_import_chart_source_no_scheme[each.value])[0]
-        sourceImage = trimprefix(local.acr_import_chart_source_no_scheme[each.value], "${split("/", local.acr_import_chart_source_no_scheme[each.value])[0]}/")
-      },
-      (var.jfrog_registry_password != "") ? {
-        credentials = {
-          username = var.jfrog_registry_username
-          password = var.jfrog_registry_password
-        }
-      } : {}
-    )
-    targetTags = ["charts/${local.acr_import_chart_name_version[each.value]}"]
-    mode       = "Force"
-  }
+  body = jsondecode(local.acr_import_chart_body_json[each.value])
 }
 
 output "import_charts_enabled" {
