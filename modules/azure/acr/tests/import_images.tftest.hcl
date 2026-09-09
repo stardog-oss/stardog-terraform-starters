@@ -29,6 +29,12 @@ run "import_body_distinguishes_registry_prefix_from_namespace_and_wires_jfrog_cr
     ]
     jfrog_registry_username = "apikey"
     jfrog_registry_password = "secret-token"
+    # Explicitly pinned to null - without this, a TF_VAR_source_registry_username/password set in
+    # the ambient shell environment (Terraform honors TF_VAR_* for any unset variable, including in
+    # `terraform test` runs) silently overrides this test's intent, which is specifically to
+    # exercise the "no source credentials configured" case.
+    source_registry_username = null
+    source_registry_password = null
   }
 
   # The whole `body.source` object is sensitive for every instance (not just the jfrog one) since

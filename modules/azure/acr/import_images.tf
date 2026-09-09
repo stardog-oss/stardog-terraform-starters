@@ -66,8 +66,15 @@ locals {
       source = {
         registryUri = local.acr_import_registry[image]
         sourceImage = local.acr_import_path[image]
+        # Checked against both null AND empty string - jfrog_registry_username/password default to
+        # "apikey"/"" (not null), so when no real JFrog credentials are configured, this ternary's
+        # condition must still resolve to "no credentials" rather than sending a real username with
+        # an empty password (which Azure's importImage API rejects identically to a null one: "The
+        # Password field is required" - caught live, since the current catalog doesn't wire any
+        # JFrog credentials in yet and hits exactly this default).
         credentials = (
-          local.acr_import_credentials[image].username != null && local.acr_import_credentials[image].password != null ? {
+          local.acr_import_credentials[image].username != null && local.acr_import_credentials[image].username != "" &&
+          local.acr_import_credentials[image].password != null && local.acr_import_credentials[image].password != "" ? {
             username = local.acr_import_credentials[image].username
             password = local.acr_import_credentials[image].password
           } : null
