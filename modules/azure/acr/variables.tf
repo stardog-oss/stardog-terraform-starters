@@ -94,8 +94,3 @@ variable "source_registry_password" {
   sensitive   = true
 }
 
-variable "shell_interpreter" {
-  description = "List of interpreter tokens for local-exec provisioners (override on Windows if /usr/bin/env is unavailable)."
-  type        = list(string)
-  default     = ["/usr/bin/env", "bash", "-lc"]
-}

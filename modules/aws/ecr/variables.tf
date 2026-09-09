@@ -80,12 +80,6 @@ variable "source_registry_password" {
   sensitive   = true
 }
 
-variable "source_registry_allow_anonymous_fallback" {
-  description = "If true, when source registry login is configured but fails, fall back to anonymous pulls instead of failing immediately."
-  type        = bool
-  default     = true
-}
-
 variable "import_images" {
   description = "Whether to import images from the source registry into this ECR repository."
   type        = bool
@@ -96,10 +90,4 @@ variable "images_to_import" {
   description = "List of images (repository:tag) to import from the source registry into this ECR repository."
   type        = list(string)
   default     = []
-}
-
-variable "shell_interpreter" {
-  description = "Interpreter tokens for local-exec steps (override on Windows if /usr/bin/env is unavailable)."
-  type        = list(string)
-  default     = ["/usr/bin/env", "bash", "-lc"]
 }
