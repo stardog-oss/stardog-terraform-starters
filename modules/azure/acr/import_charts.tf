@@ -1,5 +1,5 @@
 variable "import_charts" {
-  description = "Whether to import Helm charts from OCI registries into the ACR. Runs locally via Helm and az CLI when true."
+  description = "Whether to import Helm charts from OCI registries into the ACR."
   type        = bool
   default     = false
 }
@@ -26,103 +26,53 @@ variable "jfrog_registry_password" {
   sensitive   = true
 }
 
-resource "null_resource" "acr_import_charts" {
+locals {
+  # A Helm chart stored in an OCI registry is just an OCI artifact - ACR's importImage ARM action
+  # (the same one import_images.tf calls) works on it identically to a docker image, so charts get
+  # no special handling here beyond stripping the "oci://" scheme and the "charts/" destination
+  # prefix the old script also used.
+  acr_import_chart_source_no_scheme = {
+    for chart in var.charts_to_import : chart => trimprefix(chart, "oci://")
+  }
+  # repo:tag -> "chart-name:version" (everything after the last "/", same as the old script's sed)
+  acr_import_chart_name_version = {
+    for chart, no_scheme in local.acr_import_chart_source_no_scheme :
+    chart => element(split("/", no_scheme), length(split("/", no_scheme)) - 1)
+  }
+}
+
+# Calls ACR's own importImage ARM action directly - see import_images.tf for the full rationale
+# (no bash/az CLI/helm in tofu-controller's runner pod, confirmed live). The old script's "if az acr
+# import fails, fall back to raw helm pull/export/save/push" escape hatch is dropped: that fallback
+# needed a shell and the helm binary too, so it could never have worked here either - and modern
+# ACR's importImage handles OCI artifacts (including Helm charts) natively, which is why that
+# fallback existed as a workaround for older API/CLI limitations, not a fundamentally different
+# transfer mechanism.
+resource "azapi_resource_action" "acr_import_charts" {
   # for_each over a set, not count over the list - see import_images.tf's acr_import resource for the
   # same fix and full rationale (reordering/inserting/removing then only affects that one entry).
   for_each = var.import_charts ? toset(var.charts_to_import) : []
 
-  triggers = {
-    chart = each.value
-    acr   = local.acr_login_server
-  }
+  type        = "Microsoft.ContainerRegistry/registries@2023-07-01"
+  resource_id = local.acr_id
+  action      = "importImage"
+  method      = "POST"
 
-  provisioner "local-exec" {
-    interpreter = var.shell_interpreter
-    command     = <<EOT
-set -euo pipefail
-CHART_REF="${each.value}"
-JFROG_USER="${var.jfrog_registry_username}"
-JFROG_PASS="${var.jfrog_registry_password}"
-ACR_LOGIN_SERVER="${local.acr_login_server}"
-ACR_NAME="${local.acr_name}"
-
-echo "Preparing to import chart $${CHART_REF} into ACR $${ACR_LOGIN_SERVER} (server-side import)..."
-
-# Ensure az CLI is authenticated and has permission to the target ACR
-echo "Checking az CLI and ACR access..."
-az account show >/dev/null 2>&1 || { echo "az CLI not logged in or not installed" >&2; exit 2; }
-
-DEST_IMAGE="charts/$(echo "$${CHART_REF}" | sed -E 's|^.*/([^:]+):(.+)$|\1:\2|')"
-
-# az acr import often expects the source in the form <registry>/<repo>:<tag> (no oci:// scheme).
-SRC_NO_SCHEME="$${CHART_REF#oci://}"
-echo "Using source=$${SRC_NO_SCHEME} for az import"
-
-# Real bugs fixed in this block: (1) the command string (including the raw JFrog password) used to
-# be echoed before eval'ing it, leaking the credential into apply/CI logs - the sibling
-# import_images.tf never does this. (2) eval on a string built from unescaped image/tag
-# substitutions was an injection risk if a charts_to_import entry ever contained shell
-# metacharacters. (3) under this script's own `set -e`, "eval ...; RC=$?" never actually reached the
-# RC=$? line on failure - the script aborted immediately, so the "try with creds, fall back without
-# creds" retry never ran. Real `if cmd; then/else` conditionals (exempt from set -e) with direct,
-# properly-quoted arguments fix all three at once.
-if [ -n "$${JFROG_PASS}" ]; then
-  echo "JFROG credentials provided — trying az acr import with --username/--password first"
-  if az acr import --name "$${ACR_NAME}" --source "$${SRC_NO_SCHEME}" --image "$${DEST_IMAGE}" --username "$${JFROG_USER}" --password "$${JFROG_PASS}" --force; then
-    echo "Imported $${CHART_REF} -> $${ACR_LOGIN_SERVER}/$${DEST_IMAGE} (via az acr import with creds)"
-    exit 0
-  fi
-  echo "az acr import with creds failed; trying without creds next"
-fi
-
-echo "Attempting server-side import via az acr import (no source creds)..."
-if az acr import --name "$${ACR_NAME}" --source "$${SRC_NO_SCHEME}" --image "$${DEST_IMAGE}" --force; then
-  echo "Imported $${CHART_REF} -> $${ACR_LOGIN_SERVER}/$${DEST_IMAGE} (via az acr import)"
-else
-  echo "az acr import failed"
-  if [ -n "$${JFROG_PASS}" ]; then
-    echo "Falling back to Helm OCI pull / export / push flow"
-    # Ensure helm exists and supports chart commands
-    if ! command -v helm >/dev/null 2>&1; then
-      echo "helm not found in PATH; cannot perform fallback import" >&2
-      exit 3
-    fi
-    HELM_VER=$(helm version --short 2>/dev/null || true)
-    echo "Detected Helm: $${HELM_VER}"
-    # Try helm chart commands
-    echo "Logging into source registry and pulling chart with Helm..."
-    SOURCE_HOST=$(echo "$${CHART_REF}" | sed -E 's|^oci://([^/]+)/.*$|\\1|')
-    echo "Logging into source registry $${SOURCE_HOST} as $${JFROG_USER}..."
-    helm registry login "$${SOURCE_HOST}" --username "$${JFROG_USER}" --password "$${JFROG_PASS}"
-    echo "Pulling chart $${CHART_REF}..."
-    helm chart pull "$${CHART_REF}"
-    WORKDIR=$(mktemp -d)
-    echo "Exporting chart to $${WORKDIR}..."
-    helm chart export "$${CHART_REF}" -d "$${WORKDIR}"
-    TGZ_FILE=$(ls "$${WORKDIR}"/*.tgz | head -n1 || true)
-    if [ -z "$${TGZ_FILE}" ]; then
-      echo "Failed to find exported chart archive in $${WORKDIR}" >&2
-      exit 4
-    fi
-    TGZ_BASENAME=$(basename "$${TGZ_FILE}")
-    CHART_NAME_VER="$${TGZ_BASENAME%.tgz}"
-    DEST_REF="oci://$${ACR_LOGIN_SERVER}/charts/$${CHART_NAME_VER}"
-    echo "Saving $${TGZ_FILE} as $${DEST_REF}..."
-    helm chart save "$${TGZ_FILE}" "$${DEST_REF}"
-    echo "Pushing $${DEST_REF} to ACR..."
-    # Same set -e pitfall as the az acr import calls above: "cmd; RC=$?" never reaches the capture
-    # line on failure. A real `if cmd; then/else` (exempt from set -e) fixes it here too.
-    if ! helm chart push "$${DEST_REF}"; then
-      echo "Helm push failed" >&2
-      exit 1
-    fi
-    echo "Imported $${CHART_REF} -> $${ACR_LOGIN_SERVER}/charts/$${CHART_NAME_VER} (via Helm fallback)"
-  else
-    echo "No JFROG credentials provided; cannot access private source. Failing." >&2
-    exit 1
-  fi
-fi
-EOT
+  body = {
+    source = merge(
+      {
+        registryUri = split("/", local.acr_import_chart_source_no_scheme[each.value])[0]
+        sourceImage = trimprefix(local.acr_import_chart_source_no_scheme[each.value], "${split("/", local.acr_import_chart_source_no_scheme[each.value])[0]}/")
+      },
+      (var.jfrog_registry_password != "") ? {
+        credentials = {
+          username = var.jfrog_registry_username
+          password = var.jfrog_registry_password
+        }
+      } : {}
+    )
+    targetTags = ["charts/${local.acr_import_chart_name_version[each.value]}"]
+    mode       = "Force"
   }
 }
 
