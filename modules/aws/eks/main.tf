@@ -34,6 +34,38 @@ locals {
       ]
     })
   }
+
+  # Real bug this fixes: min/max/desired_size used to fall back to var.node_min_size/node_max_size/
+  # node_desired_size when a pool left min_count/max_count/node_count unset - but those vars are the
+  # DEFAULT node group's own sizing, not a per-user-pool fallback. A pool that set only
+  # max_count = 2 (leaving min_count unset) inherited min_size = var.node_min_size (3 by default),
+  # producing min(3) > max(2) - a genuine EKS API rejection at apply, not just a style issue. Fixed
+  # by computing min_size first from pool-local values only, then constraining max/desired relative
+  # to it so they're always >= it by construction - never cross-contaminated by the default pool's
+  # own sizing.
+  user_node_pool_min_size = {
+    for name, cfg in local.normalized_user_node_pools :
+    name => cfg.auto_scaling_enabled ? coalesce(cfg.min_count, cfg.node_count, 1) : cfg.node_count
+  }
+
+  user_node_pool_max_size = {
+    for name, cfg in local.normalized_user_node_pools :
+    name => cfg.auto_scaling_enabled ? max(
+      coalesce(cfg.max_count, cfg.node_count, local.user_node_pool_min_size[name]),
+      local.user_node_pool_min_size[name]
+    ) : cfg.node_count
+  }
+
+  user_node_pool_desired_size = {
+    for name, cfg in local.normalized_user_node_pools :
+    name => cfg.auto_scaling_enabled ? min(
+      max(
+        coalesce(cfg.node_count, cfg.min_count, cfg.max_count, local.user_node_pool_min_size[name]),
+        local.user_node_pool_min_size[name]
+      ),
+      local.user_node_pool_max_size[name]
+    ) : cfg.node_count
+  }
 }
 
 resource "aws_security_group" "cluster" {
@@ -220,9 +252,9 @@ resource "aws_eks_node_group" "user" {
   labels          = each.value.node_labels
 
   scaling_config {
-    desired_size = each.value.auto_scaling_enabled ? coalesce(each.value.node_count, each.value.min_count, each.value.max_count, var.node_desired_size) : each.value.node_count
-    min_size     = each.value.auto_scaling_enabled ? coalesce(each.value.min_count, each.value.node_count, var.node_min_size, 1) : each.value.node_count
-    max_size     = each.value.auto_scaling_enabled ? coalesce(each.value.max_count, each.value.node_count, var.node_max_size) : each.value.node_count
+    desired_size = local.user_node_pool_desired_size[each.key]
+    min_size     = local.user_node_pool_min_size[each.key]
+    max_size     = local.user_node_pool_max_size[each.key]
   }
 
   dynamic "taint" {
@@ -347,11 +379,24 @@ resource "null_resource" "ensure_kubeconfig" {
 
   provisioner "local-exec" {
     interpreter = var.shell_interpreter
-    command     = <<-EOT
+    # Passed via environment, not interpolated into the command string - matches the safer pattern
+    # already used elsewhere in this codebase (see aws/ecr's import provisioner), avoiding quoting/
+    # injection issues from a Terraform value (e.g. a cluster_name containing a `"`) landing
+    # directly in command text.
+    environment = {
+      CLUSTER_NAME    = aws_eks_cluster.this.name
+      AWS_REGION      = var.aws_region
+      ALIAS           = var.cluster_name
+      KUBECONFIG_PATH = var.kubeconfig_path
+    }
+    command = <<-EOT
       set -euo pipefail
-      KUBECONFIG_PATH="$(eval echo "${var.kubeconfig_path}")"
-      mkdir -p "$(dirname "$KUBECONFIG_PATH")"
-      aws eks update-kubeconfig --name "${aws_eks_cluster.this.name}" --region "${var.aws_region}" --alias "${var.cluster_name}" --kubeconfig "$KUBECONFIG_PATH"
+      # Expand a leading ~ to $HOME without eval - real bug this fixes: eval on an unvalidated,
+      # Terraform-variable-sourced path is a genuine shell-injection surface (a kubeconfig_path
+      # containing a backtick or $(...) would execute arbitrary commands here).
+      RESOLVED_KUBECONFIG_PATH="$${KUBECONFIG_PATH/#\~/$HOME}"
+      mkdir -p "$(dirname "$RESOLVED_KUBECONFIG_PATH")"
+      aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --alias "$ALIAS" --kubeconfig "$RESOLVED_KUBECONFIG_PATH"
     EOT
   }
 

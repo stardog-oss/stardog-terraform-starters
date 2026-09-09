@@ -15,10 +15,14 @@ variable "images_to_import" {
 }
 
 resource "null_resource" "acr_import" {
-  count = var.import_images ? length(var.images_to_import) : 0
+  # for_each over a set, not count over the list - each instance is keyed by the image string itself
+  # (null_resource.acr_import["repo/image:tag"]), not its position. Reordering, inserting, or removing
+  # an entry then only affects that one entry's resource, instead of shifting every later index and
+  # forcing a spurious re-import of everything after it.
+  for_each = var.import_images ? toset(var.images_to_import) : []
 
   triggers = {
-    image = element(var.images_to_import, count.index)
+    image = each.value
     acr   = local.acr_name
   }
 
@@ -26,7 +30,7 @@ resource "null_resource" "acr_import" {
     interpreter = var.shell_interpreter
     command     = <<EOT
 set -euo pipefail
-IMAGE="${element(var.images_to_import, count.index)}"
+IMAGE="${each.value}"
 ACR="${local.acr_name}"
 SRC_USER="${var.source_registry_username == null ? "" : var.source_registry_username}"
 SRC_PASS="${var.source_registry_password == null ? "" : var.source_registry_password}"

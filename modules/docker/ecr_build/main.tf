@@ -17,20 +17,26 @@ locals {
     "-f", var.dockerfile
   ], var.build_args, ["."])
 
+  # Each token individually quoted, not joined with bare spaces - real bug this fixes: source_dir,
+  # dockerfile, or any build_args entry containing a space (user/pipeline-controlled input) broke
+  # tokenization (wrong cd target, or a build arg silently split into two words) since the whole
+  # command was built as one unquoted string.
+  docker_build_args_quoted = join(" ", [for arg in local.docker_build_args : "\"${arg}\""])
+
   login_command = <<-EOT
-    aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${local.registry_host}
+    aws ecr get-login-password --region "${var.aws_region}" | docker login --username AWS --password-stdin "${local.registry_host}"
   EOT
 
   platform_export = var.target_platform != null ? "export DOCKER_DEFAULT_PLATFORM='${var.target_platform}'" : ""
 
   build_push_command = <<-EOT
     set -euo pipefail
-    cd ${local.context_abs}
+    cd "${local.context_abs}"
     ${local.login_command}
     ${local.platform_export}
-    docker ${join(" ", local.docker_build_args)}
-    docker push ${local.image_uri}
-    docker logout ${local.registry_host} >/dev/null 2>&1 || true
+    docker ${local.docker_build_args_quoted}
+    docker push "${local.image_uri}"
+    docker logout "${local.registry_host}" >/dev/null 2>&1 || true
   EOT
 }
 
@@ -40,7 +46,11 @@ resource "null_resource" "build" {
       context_hash = local.context_hash
       image_uri    = local.image_uri
       repository   = var.repository_url
-      platform     = coalesce(var.target_platform, "")
+      # coalesce() requires at least one non-null AND non-empty-string argument - coalesce(x, "")
+      # always errors when x is null, since "" doesn't count as a valid fallback either (same
+      # coalesce() misuse bug already found and fixed elsewhere in this project). Only actually
+      # surfaced once target_platform's own default was corrected from "linux/amd64" to null.
+      platform = var.target_platform != null ? var.target_platform : ""
     },
     var.extra_triggers,
   )

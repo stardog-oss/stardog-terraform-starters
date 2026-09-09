@@ -62,9 +62,11 @@ output "launchpad_client_secret" {
 }
 
 output "sparql_secret_entries" {
-  value = module.aad_sparql.secret_entries
+  value     = module.aad_sparql.secret_entries
+  sensitive = true
 }
 
 output "launchpad_secret_entries" {
-  value = module.aad_launchpad.secret_entries
+  value     = module.aad_launchpad.secret_entries
+  sensitive = true
 }

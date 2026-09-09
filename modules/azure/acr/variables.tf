@@ -61,7 +61,12 @@ variable "acr_sku" {
 variable "acr_admin_enabled" {
   description = "Whether to enable the ACR admin user (username/password). Consider false for production."
   type        = bool
-  default     = true
+  # false, not true - the old default directly contradicted this variable's own description, and
+  # RBAC (this module already wires up AcrPull to the kubelet identity) already covers the real
+  # pull-access use case, making the admin user/password unnecessary attack surface enabled by
+  # default. Callers that explicitly pass their own value (e.g. envctl's shared/variables.tf, which
+  # has its own separate default) are unaffected either way.
+  default = false
 }
 
 variable "manage_acr" {

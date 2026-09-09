@@ -25,3 +25,25 @@ run "acr_plan" {
     error_message = "ACR admin should be enabled in this test."
   }
 }
+
+run "acr_admin_disabled_by_default" {
+  command = plan
+
+  variables {
+    resource_group_name       = "ut-acr-rg"
+    location                  = "eastus"
+    cluster_name              = "ut-aks"
+    acr_name                  = "unittestacr"
+    acr_sku                   = "Basic"
+    tags                      = { env = "test" }
+    cluster_kubelet_object_id = null
+  }
+
+  # Real bug this guards against: acr_admin_enabled used to default to true, directly contradicting
+  # its own description ("Consider false for production") - RBAC (AcrPull to the kubelet identity)
+  # already covers the real use case, making the admin user/password unnecessary attack surface.
+  assert {
+    condition     = azurerm_container_registry.this[0].admin_enabled == false
+    error_message = "ACR admin should default to disabled, matching this variable's own description."
+  }
+}

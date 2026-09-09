@@ -52,7 +52,10 @@ variable "environment" {
 variable "target_platform" {
   description = "Sets DOCKER_DEFAULT_PLATFORM for the build (e.g., 'linux/amd64'). Leave null to use Docker's default behavior."
   type        = string
-  default     = "linux/amd64"
+  # null, not "linux/amd64" - the default used to silently contradict this variable's own
+  # description ("leave null to use Docker's default"), forcing amd64 on every caller who simply
+  # omitted this variable expecting Docker's native (host-architecture) behavior instead.
+  default = null
 }
 
 variable "shell_interpreter" {

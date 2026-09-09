@@ -26,17 +26,26 @@ output "log_analytics_workspace_name" {
   description = "Name of the Log Analytics workspace created by this module (if create_log_analytics = true)."
 }
 
+# Real bug this fixes: the whole kube_config attribute is provider-schema-marked sensitive (unlike
+# kube_config_raw's own output above, these four weren't marked sensitive here) - any consumer that
+# re-exports one of these without independently adding sensitive = true itself gets a hard
+# "Output refers to sensitive values" error at plan time, and without that error, would otherwise
+# print real cluster credentials to apply/output/CI logs.
 output "kube_host" {
-  value = azurerm_kubernetes_cluster.this.kube_config[0].host
+  value     = azurerm_kubernetes_cluster.this.kube_config[0].host
+  sensitive = true
 }
 output "kube_client_certificate" {
-  value = azurerm_kubernetes_cluster.this.kube_config[0].client_certificate
+  value     = azurerm_kubernetes_cluster.this.kube_config[0].client_certificate
+  sensitive = true
 }
 output "kube_client_key" {
-  value = azurerm_kubernetes_cluster.this.kube_config[0].client_key
+  value     = azurerm_kubernetes_cluster.this.kube_config[0].client_key
+  sensitive = true
 }
 output "kube_cluster_ca_certificate" {
-  value = azurerm_kubernetes_cluster.this.kube_config[0].cluster_ca_certificate
+  value     = azurerm_kubernetes_cluster.this.kube_config[0].cluster_ca_certificate
+  sensitive = true
 }
 # (If you prefer admin config, export kube_admin_config equivalents instead.)
 

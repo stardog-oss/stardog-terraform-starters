@@ -79,8 +79,13 @@ resource "aws_nat_gateway" "this" {
   count = length(aws_eip.nat)
 
   allocation_id = aws_eip.nat[count.index].id
-  subnet_id     = values(aws_subnet.public)[var.single_nat_gateway ? 0 : count.index].id
-  depends_on    = [aws_eip.nat]
+  # Direct key lookup, not values(aws_subnet.public)[...] - real bug this fixes: aws_subnet.public
+  # is for_each-keyed by the stringified original list index ("0","1",..."10",...), and values()
+  # returns entries ordered by keys() sorted LEXICOGRAPHICALLY, not numerically - confirmed directly
+  # ("10" sorts right after "1", before "2"). With >=10 public subnets and single_nat_gateway=false,
+  # this silently paired NAT gateways with the wrong subnets from that point on.
+  subnet_id  = aws_subnet.public[tostring(var.single_nat_gateway ? 0 : count.index)].id
+  depends_on = [aws_eip.nat]
 
   tags = merge(var.tags, { Name = "${var.name}-nat-${count.index}" })
 }

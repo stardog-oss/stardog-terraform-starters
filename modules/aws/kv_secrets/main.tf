@@ -8,14 +8,21 @@ locals {
 
   base_secret_name = try(
     regex("arn:aws:secretsmanager:[^:]+:[^:]+:secret:(.+)", var.secret_arn)[0],
-    replace(var.secret_arn, "arn:aws:secretsmanager:[^:]+:[^:]+:secret:", "")
+    # Same missing-delimiter bug as sanitized_entries below - without `/.../` this was a literal
+    # substring match that could never fire, silently returning the ARN unstripped if the regex()
+    # above ever failed to match a malformed/non-standard secret_arn.
+    replace(var.secret_arn, "/arn:aws:secretsmanager:[^:]+:[^:]+:secret:/", "")
   )
 
   name_prefix = coalesce(var.secret_name_prefix, local.base_secret_name)
 
   sanitized_entries = {
     for name, entry in var.secrets : name => merge(entry, {
-      secret_name = replace(format("%s/%s", local.name_prefix, name), "[^a-zA-Z0-9/_+=.@-]", "-")
+      # Must be delimited with `/.../` to be treated as a regex at all - without it, replace()
+      # does a literal substring match (which never matches this pattern), silently skipping the
+      # sanitization this line's own intent clearly calls for. The internal `/` (secret names may
+      # contain path separators) must itself be escaped so it isn't read as the closing delimiter.
+      secret_name = replace(format("%s/%s", local.name_prefix, name), "/[^a-zA-Z0-9\\/_+=.@-]/", "-")
     })
   }
 }
@@ -50,5 +57,10 @@ output "secret_names" {
 
 output "aggregate_payload" {
   description = "JSON payload written when aggregate_json = true."
-  value       = var.aggregate_json ? local.aggregate_payload : null
+  # Real leak this fixes: local.aggregate_payload embeds every entry's plaintext value, built
+  # independently of aws_secretsmanager_secret_version.entry (whose own secret_string IS
+  # provider-schema-sensitive) - that protection doesn't propagate to this hand-rolled local/output,
+  # so without this, `terraform apply`/`output`/`show` printed every secret in clear text.
+  sensitive = true
+  value     = var.aggregate_json ? local.aggregate_payload : null
 }

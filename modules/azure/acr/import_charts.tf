@@ -27,10 +27,12 @@ variable "jfrog_registry_password" {
 }
 
 resource "null_resource" "acr_import_charts" {
-  count = var.import_charts ? length(var.charts_to_import) : 0
+  # for_each over a set, not count over the list - see import_images.tf's acr_import resource for the
+  # same fix and full rationale (reordering/inserting/removing then only affects that one entry).
+  for_each = var.import_charts ? toset(var.charts_to_import) : []
 
   triggers = {
-    chart = element(var.charts_to_import, count.index)
+    chart = each.value
     acr   = local.acr_login_server
   }
 
@@ -38,7 +40,7 @@ resource "null_resource" "acr_import_charts" {
     interpreter = var.shell_interpreter
     command     = <<EOT
 set -euo pipefail
-CHART_REF="${element(var.charts_to_import, count.index)}"
+CHART_REF="${each.value}"
 JFROG_USER="${var.jfrog_registry_username}"
 JFROG_PASS="${var.jfrog_registry_password}"
 ACR_LOGIN_SERVER="${local.acr_login_server}"
@@ -56,28 +58,28 @@ DEST_IMAGE="charts/$(echo "$${CHART_REF}" | sed -E 's|^.*/([^:]+):(.+)$|\1:\2|')
 SRC_NO_SCHEME="$${CHART_REF#oci://}"
 echo "Using source=$${SRC_NO_SCHEME} for az import"
 
+# Real bugs fixed in this block: (1) the command string (including the raw JFrog password) used to
+# be echoed before eval'ing it, leaking the credential into apply/CI logs - the sibling
+# import_images.tf never does this. (2) eval on a string built from unescaped image/tag
+# substitutions was an injection risk if a charts_to_import entry ever contained shell
+# metacharacters. (3) under this script's own `set -e`, "eval ...; RC=$?" never actually reached the
+# RC=$? line on failure - the script aborted immediately, so the "try with creds, fall back without
+# creds" retry never ran. Real `if cmd; then/else` conditionals (exempt from set -e) with direct,
+# properly-quoted arguments fix all three at once.
 if [ -n "$${JFROG_PASS}" ]; then
   echo "JFROG credentials provided — trying az acr import with --username/--password first"
-  AZ_CMD_CREDS="az acr import --name \"$${ACR_NAME}\" --source \"$${SRC_NO_SCHEME}\" --image \"$${DEST_IMAGE}\" --username \"$${JFROG_USER}\" --password \"$${JFROG_PASS}\" --force"
-  echo "Running: $${AZ_CMD_CREDS}"
-  eval $${AZ_CMD_CREDS}
-  RC=$?
-  if [ $RC -eq 0 ]; then
+  if az acr import --name "$${ACR_NAME}" --source "$${SRC_NO_SCHEME}" --image "$${DEST_IMAGE}" --username "$${JFROG_USER}" --password "$${JFROG_PASS}" --force; then
     echo "Imported $${CHART_REF} -> $${ACR_LOGIN_SERVER}/$${DEST_IMAGE} (via az acr import with creds)"
     exit 0
   fi
-  echo "az acr import with creds failed with exit code $RC; trying without creds next"
+  echo "az acr import with creds failed; trying without creds next"
 fi
 
 echo "Attempting server-side import via az acr import (no source creds)..."
-AZ_CMD="az acr import --name \"$${ACR_NAME}\" --source \"$${SRC_NO_SCHEME}\" --image \"$${DEST_IMAGE}\" --force"
-echo "Running: $${AZ_CMD}"
-eval $${AZ_CMD}
-RC=$?
-if [ $RC -eq 0 ]; then
+if az acr import --name "$${ACR_NAME}" --source "$${SRC_NO_SCHEME}" --image "$${DEST_IMAGE}" --force; then
   echo "Imported $${CHART_REF} -> $${ACR_LOGIN_SERVER}/$${DEST_IMAGE} (via az acr import)"
 else
-  echo "az acr import failed with exit code $RC"
+  echo "az acr import failed"
   if [ -n "$${JFROG_PASS}" ]; then
     echo "Falling back to Helm OCI pull / export / push flow"
     # Ensure helm exists and supports chart commands
@@ -108,16 +110,16 @@ else
     echo "Saving $${TGZ_FILE} as $${DEST_REF}..."
     helm chart save "$${TGZ_FILE}" "$${DEST_REF}"
     echo "Pushing $${DEST_REF} to ACR..."
-    helm chart push "$${DEST_REF}"
-    RC2=$?
-    if [ $RC2 -ne 0 ]; then
-      echo "Helm push failed with exit code $RC2" >&2
-      exit $RC2
+    # Same set -e pitfall as the az acr import calls above: "cmd; RC=$?" never reaches the capture
+    # line on failure. A real `if cmd; then/else` (exempt from set -e) fixes it here too.
+    if ! helm chart push "$${DEST_REF}"; then
+      echo "Helm push failed" >&2
+      exit 1
     fi
     echo "Imported $${CHART_REF} -> $${ACR_LOGIN_SERVER}/charts/$${CHART_NAME_VER} (via Helm fallback)"
   else
     echo "No JFROG credentials provided; cannot access private source. Failing." >&2
-    exit $RC
+    exit 1
   fi
 fi
 EOT

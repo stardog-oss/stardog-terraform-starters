@@ -162,9 +162,17 @@ variable "log_analytics_workspace_id" {
   default     = null
 }
 variable "kubeconfig_path" {
-  description = "Path where az aks get-credentials should write when enable_kubectl_helpers is true."
+  # Real bugs fixed here: (1) this description referenced "enable_kubectl_helpers", a variable that
+  # doesn't exist anywhere in this module (leftover from a refactor - the real gating variables are
+  # enable_nodeport_nsg_rules/enable_ingress_application_gateway). (2) the old default,
+  # "~/.kube/config", is the operator's own real, shared kubeconfig - concurrent `terraform apply`
+  # runs (this project's whole point is provisioning multiple environments) race on read-modify-
+  # write of that same file via `az aks get-credentials --overwrite-existing`. Defaulting to null
+  # lets main.tf compute a per-cluster scratch path instead (variable defaults can't reference
+  # var.name themselves).
+  description = "Path where az aks get-credentials should write, when enable_nodeport_nsg_rules is true and enable_ingress_application_gateway is false. Null (the default) computes a per-cluster scratch path instead of the operator's own shared ~/.kube/config, to avoid concurrent applies racing on the same file."
   type        = string
-  default     = "~/.kube/config"
+  default     = null
 }
 
 variable "enable_nodeport_nsg_rules" {

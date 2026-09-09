@@ -215,6 +215,12 @@ resource "null_resource" "assignment" {
     ensure_command  = local.ensure_command
     destroy_command = local.destroy_command_effective
     local_exec_env  = jsonencode(var.local_exec_env)
+    # Routed through triggers (same jsonencode/jsondecode pattern local_exec_env already uses) so
+    # the destroy-time provisioner below can reach it - destroy-time provisioners may only
+    # reference self/count.index/each.key, never var.* directly (a real Terraform constraint, not
+    # an oversight in the original code - confirmed via `terraform validate` rejecting a direct
+    # var.shell_interpreter reference there with "Invalid reference from destroy provisioner").
+    shell_interpreter = jsonencode(var.shell_interpreter)
   }
 
   provisioner "local-exec" {
@@ -225,8 +231,12 @@ resource "null_resource" "assignment" {
   }
 
   provisioner "local-exec" {
-    when        = destroy
+    when = destroy
+    # interpreter added - real bug this fixes: the create-time provisioner right above sets this
+    # explicitly, but this one didn't, silently falling back to Terraform's own default interpreter
+    # instead of respecting a shell_interpreter override on destroy.
     command     = self.triggers.destroy_command
+    interpreter = jsondecode(self.triggers.shell_interpreter)
     environment = jsondecode(self.triggers.local_exec_env)
   }
 }

@@ -21,7 +21,7 @@ resource "azurerm_key_vault" "this" {
     content {
       tenant_id          = local.tenant_id
       object_id          = local.admin_object_id
-      secret_permissions = ["Get", "List", "Set", "Delete", "Purge" ]
+      secret_permissions = ["Get", "List", "Set", "Delete", "Purge"]
     }
   }
 
@@ -35,10 +35,17 @@ resource "azurerm_key_vault" "this" {
 
 # Grant Key Vault Secrets Officer to the admin group (when provided)
 resource "azurerm_role_assignment" "kv_secret_officer_admin_group" {
-  count               = var.admin_group_object_id != null && trimspace(var.admin_group_object_id) != "" ? 1 : 0
-  scope               = azurerm_key_vault.this.id
+  # rbac_authorization_enabled gate added - real bug this fixes: this assignment was missing the
+  # same gate its sibling (kv_secret_officer_admin_object, right below) already has. In
+  # access-policy mode (rbac_authorization_enabled = false), Key Vault ignores RBAC role
+  # assignments entirely - so a caller setting use_access_policies=true,
+  # rbac_authorization_enabled=false, and admin_group_object_id (matching this variable's own
+  # description promising the group gets administered) silently ended up with zero real access,
+  # since the access_policy block above only ever covers admin_object_id, never the group.
+  count                = var.rbac_authorization_enabled && var.admin_group_object_id != null && trimspace(var.admin_group_object_id) != "" ? 1 : 0
+  scope                = azurerm_key_vault.this.id
   role_definition_name = "Key Vault Secrets Officer"
-  principal_id        = var.admin_group_object_id
+  principal_id         = var.admin_group_object_id
 }
 
 # Optionally grant the specified admin_object_id (single user/SP) the role

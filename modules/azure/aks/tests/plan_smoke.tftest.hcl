@@ -1,5 +1,21 @@
 # Make the module testable without a real Azure config
-mock_provider "azurerm" {}
+mock_provider "azurerm" {
+  # A generic mock otherwise generates an empty kube_config list, and this module's own
+  # kube_host/kube_client_certificate/kube_client_key/kube_cluster_ca_certificate outputs all index
+  # into kube_config[0] - needed for those outputs to evaluate at all under a mocked apply.
+  mock_resource "azurerm_kubernetes_cluster" {
+    defaults = {
+      kube_config = [{
+        host                   = "https://ut-aks.example.com"
+        client_certificate     = "mock-client-cert"
+        client_key             = "mock-client-key"
+        cluster_ca_certificate = "mock-ca-cert"
+        username               = "mock-user"
+        password               = "mock-password"
+      }]
+    }
+  }
+}
 
 run "plan_smoke" {
   command = apply
@@ -23,6 +39,12 @@ run "plan_smoke" {
     user_node_pools = {}
     attach_acr_names  = []
     tags            = { env = "test" }
+
+    # Skips the ensure_node_nsg_allow_azure_lb local-exec provisioner entirely - it shells out to
+    # real `az`/`kubectl` regardless of the mocked provider (mocking only replaces the provider's own
+    # API calls, not arbitrary local-exec commands), which this test isn't exercising and shouldn't
+    # depend on real Azure access for.
+    enable_nodeport_nsg_rules = false
 
     create_log_analytics = false
     log_analytics_workspace_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/workspaceName"

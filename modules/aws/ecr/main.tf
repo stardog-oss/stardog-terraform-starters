@@ -21,6 +21,15 @@ locals {
   }) : null
 
   repository_policy = var.repository_policy_json != null ? var.repository_policy_json : local.generated_repository_policy
+
+  # Extracted so it's a real, independently testable value (see tests/) rather than only visible
+  # inside a provisioner's environment map. Must be delimited with /.../ to be treated as a regex at
+  # all - without it, replace() does a literal substring match for the 4 characters "/.*$", which
+  # never appears in a real repository URL, so this silently never stripped anything and docker
+  # login/logout targeted "registry/repo-name" (an invalid host) instead of just the registry host.
+  # The internal `/` (part of what we're matching, not the delimiter) is escaped so it isn't read as
+  # the closer.
+  dest_registry_host = replace(aws_ecr_repository.this.repository_url, "/\\/.*$/", "")
 }
 
 resource "aws_ecr_repository" "this" {
@@ -59,10 +68,14 @@ resource "aws_ecr_repository_policy" "this" {
 }
 
 resource "null_resource" "import" {
-  count = var.import_images ? length(var.images_to_import) : 0
+  # for_each over a set, not count over the list - each instance is keyed by the image string itself
+  # (null_resource.import["repo/image:tag"]), not its position. Reordering, inserting, or removing an
+  # entry then only affects that one entry's resource, instead of shifting every later index and
+  # forcing a spurious re-import of everything after it.
+  for_each = var.import_images ? toset(var.images_to_import) : []
 
   triggers = {
-    image           = element(var.images_to_import, count.index)
+    image           = each.value
     repository      = aws_ecr_repository.this.repository_url
     source_registry = var.source_registry_url
     source_user     = var.source_registry_username == null ? "" : var.source_registry_username
@@ -71,12 +84,12 @@ resource "null_resource" "import" {
   provisioner "local-exec" {
     interpreter = var.shell_interpreter
     environment = {
-      IMAGE      = element(var.images_to_import, count.index)
-      SRC_REG    = coalesce(var.source_registry_url, "")
-      SRC_USER   = coalesce(var.source_registry_username, "")
-      SRC_PASS   = coalesce(var.source_registry_password, "")
+      IMAGE     = each.value
+      SRC_REG   = coalesce(var.source_registry_url, "")
+      SRC_USER  = coalesce(var.source_registry_username, "")
+      SRC_PASS  = coalesce(var.source_registry_password, "")
       DEST_REPO  = aws_ecr_repository.this.repository_url
-      DEST_REG   = replace(aws_ecr_repository.this.repository_url, "/.*$", "")
+      DEST_REG   = local.dest_registry_host
       AWS_REGION = data.aws_region.current.name
       ALLOW_ANON = var.source_registry_allow_anonymous_fallback ? "true" : "false"
     }

@@ -16,10 +16,15 @@ locals {
     ["--registry", var.registry_name, "--image", local.image_tag, "--file", var.dockerfile],
     var.additional_build_args
   )
+  # Each token individually quoted, not joined with bare spaces - real bug this fixes: source_dir,
+  # dockerfile, or any additional_build_args entry containing a space (user/pipeline-controlled
+  # input) broke tokenization (wrong cd target, or an arg silently split into two words) since the
+  # whole command was built as one unquoted string.
+  build_args_tokens_quoted = join(" ", [for arg in local.build_args_tokens : "\"${arg}\""])
   build_command = <<-EOT
     set -euo pipefail
-    cd ${local.context_abs}
-    az acr build ${join(" ", local.build_args_tokens)} .
+    cd "${local.context_abs}"
+    az acr build ${local.build_args_tokens_quoted} .
   EOT
 }
 

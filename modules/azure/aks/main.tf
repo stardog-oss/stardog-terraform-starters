@@ -15,6 +15,13 @@ resource "azurerm_log_analytics_workspace" "this" {
    Requirements: the machine running `terraform apply` must have `az` CLI
    installed and be authenticated with permissions to update NSGs.
 */
+locals {
+  # See variables.tf's kubeconfig_path comment - defaults to a per-cluster scratch path (never the
+  # operator's own shared ~/.kube/config) rather than a shared default that concurrent applies would
+  # race on.
+  effective_kubeconfig_path = coalesce(var.kubeconfig_path, "~/.kube/${var.name}-config")
+}
+
 resource "null_resource" "ensure_node_nsg_allow_azure_lb" {
   count = (var.enable_ingress_application_gateway || !var.enable_nodeport_nsg_rules) ? 0 : 1
   # rerun when cluster or node RG changes
@@ -25,12 +32,16 @@ resource "null_resource" "ensure_node_nsg_allow_azure_lb" {
 
   provisioner "local-exec" {
     interpreter = var.shell_interpreter
-    command     = <<-EOT
+    # Passed via environment, not interpolated into the command string - matches the safer pattern
+    # used elsewhere in this codebase.
+    environment = {
+      NODE_RG         = azurerm_kubernetes_cluster.this.node_resource_group
+      AKS_RG          = azurerm_kubernetes_cluster.this.resource_group_name
+      AKS_NAME        = azurerm_kubernetes_cluster.this.name
+      KUBECONFIG_PATH = local.effective_kubeconfig_path
+    }
+    command = <<-EOT
       set -euo pipefail
-
-      NODE_RG="${azurerm_kubernetes_cluster.this.node_resource_group}"
-      AKS_RG="${azurerm_kubernetes_cluster.this.resource_group_name}"
-      AKS_NAME="${azurerm_kubernetes_cluster.this.name}"
 
       if [ -z "$NODE_RG" ]; then
         echo "No node resource group available; skipping NSG updates"
@@ -49,9 +60,16 @@ resource "null_resource" "ensure_node_nsg_allow_azure_lb" {
 
       # Fetch AKS credentials so we can query the ingress service
       echo "Fetching AKS credentials for $AKS_NAME (rg=$AKS_RG)"
-      KUBECONFIG_PATH="$(eval echo "${var.kubeconfig_path}")"
-      mkdir -p "$(dirname "$KUBECONFIG_PATH")"
-      az aks get-credentials -g "$AKS_RG" -n "$AKS_NAME" --file "$KUBECONFIG_PATH" --overwrite-existing >/dev/null
+      # Expand a leading ~ to $HOME without eval - real bug this fixes: eval on an unvalidated,
+      # Terraform-variable-sourced path is a genuine shell-injection surface (a kubeconfig_path
+      # containing a backtick or $(...) would execute arbitrary commands here).
+      RESOLVED_KUBECONFIG_PATH="$${KUBECONFIG_PATH/#\~/$HOME}"
+      mkdir -p "$(dirname "$RESOLVED_KUBECONFIG_PATH")"
+      az aks get-credentials -g "$AKS_RG" -n "$AKS_NAME" --file "$RESOLVED_KUBECONFIG_PATH" --overwrite-existing >/dev/null
+      # Every kubectl call below this point has no explicit --kubeconfig flag, so it needs this
+      # exported to actually find the credentials just written above (this now defaults to a
+      # per-cluster scratch path, not the operator's shared ~/.kube/config anymore).
+      export KUBECONFIG="$RESOLVED_KUBECONFIG_PATH"
 
       # Poll for the ingress service to appear and extract nodePorts
       echo "Polling for ingress-nginx-controller service (namespace: ingress-objects) to discover nodePorts"
@@ -206,11 +224,18 @@ resource "azurerm_kubernetes_cluster" "this" {
 
 locals {
   kubelet_oid = try(azurerm_kubernetes_cluster.this.kubelet_identity[0].object_id, null)
+
+  # Real bug this fixes: attach_acr_id (singular) was documented (its own description says "in
+  # addition to attach_acr_id if set", and the README has a worked example) but never actually
+  # referenced anywhere in this module - only the plural attach_acr_ids fed the grant below. A
+  # caller following the README got no AcrPull grant at all, with no error - a silent
+  # ImagePullBackOff at runtime, not a plan/apply failure. Merged into one effective set here.
+  effective_attach_acr_ids = toset(concat(var.attach_acr_ids, var.attach_acr_id != null ? [var.attach_acr_id] : []))
 }
 
 # Existing registries (plan-known keys)
 resource "azurerm_role_assignment" "acr_pull_existing" {
-  for_each             = { for id in var.attach_acr_ids : id => id }
+  for_each             = { for id in local.effective_attach_acr_ids : id => id }
   scope                = each.value # ACR resource ID
   role_definition_name = "AcrPull"
   principal_id         = local.kubelet_oid

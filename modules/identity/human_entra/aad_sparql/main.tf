@@ -110,8 +110,12 @@ locals {
 }
 resource "azuread_application_password" "pwd" {
   application_id = azuread_application.app.id
-  display_name   = "puppy"
-  end_date       = local.app_password_end
+  # var.inst_id, not the literal "puppy" - real bug this fixes: every SPARQL app password showed up
+  # in the Azure AD portal identically labeled "puppy" regardless of environment, unlike the
+  # otherwise-identical aad_launchpad/aad_service_client modules, which already correctly use
+  # var.inst_id here - making credentials impossible to distinguish or rotate across instances.
+  display_name = var.inst_id
+  end_date     = local.app_password_end
 }
 
 # Ensure the provided owners have Key Vault Secrets Officer role for the target vault when using Azure Key Vault

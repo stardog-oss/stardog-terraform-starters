@@ -4,4 +4,10 @@ output "secret" {
     value = azuread_application_password.pwd.value
     sensitive = true
 }
-output "secret_entries" { value = local.secret_entries }
+output "secret_entries" {
+  # Real leak this fixes: secret_entries embeds the same plaintext azuread_application_password.pwd
+  # value as the "secret" output right above it - that one is correctly marked sensitive, this one
+  # wasn't, printing the client secret to apply/output/CI logs.
+  value     = local.secret_entries
+  sensitive = true
+}
