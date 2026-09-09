@@ -50,4 +50,13 @@ run "import_body_distinguishes_registry_prefix_from_namespace_and_wires_jfrog_cr
     condition     = nonsensitive(azapi_resource_action.acr_import["stardog-example-helm-chart.jfrog.io/hello-world-app:latest"].body).source.credentials.username == "apikey"
     error_message = "a jfrog.io source registry must use the jfrog_registry_username/password variables, not source_registry_username/password."
   }
+
+  # NOTE: a stricter assertion belongs here too - "no source_registry_username/password configured
+  # for a non-jfrog image must mean body.source.credentials is fully null, not a credentials object
+  # with null username/password" (the real bug this module hit live: Azure's importImage API
+  # rejected the latter as invalid, not "anonymous"). Every attempt to assert that here hits the
+  # test framework's own sensitivity-comparison limitations (nonsensitive() at any wrapping point
+  # tried still leaves the comparison itself erroring rather than evaluating true/false) - verified
+  # correct instead via the actual live apply after this fix (see the git history/PR for the real
+  # ImportImage request that succeeded).
 }

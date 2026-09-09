@@ -61,14 +61,8 @@ variable "tags" {
   default     = {}
 }
 
-variable "source_registry_url" {
-  description = "Base URL of the source container registry (e.g., docker.io, myregistry.example.com)."
-  type        = string
-  default     = "docker.io"
-}
-
 variable "source_registry_username" {
-  description = "Optional source registry username used when importing images."
+  description = "Optional source registry username, applied only to images whose parsed registry (from the image string itself) isn't the default docker.io - see local.import_source_registry."
   type        = string
   default     = null
 }

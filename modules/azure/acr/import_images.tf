@@ -47,6 +47,22 @@ locals {
       password = var.source_registry_password
     }
   }
+  # A single ternary between "a real {username,password} object" and literal `null` - not the
+  # `merge({...}, cond ? {credentials = {...}} : {})` shape this replaced. Real bug that shape hit
+  # live: HCL's conditional-expression type unification pads the untaken `{}` branch with a
+  # `credentials` attribute too (to match the other branch's object type), but fills its nested
+  # username/password with null rather than omitting the key - Azure's importImage API then sees a
+  # *present* credentials object with a null password and rejects it ("The Password field is
+  # required"), instead of treating it as "no credentials supplied". Both branches here are the
+  # exact same type (object(...) or null), so there's nothing to unify a nested null into.
+  acr_import_credentials_or_null = {
+    for image, creds in local.acr_import_credentials : image => (
+      creds.username != null && creds.password != null ? {
+        username = creds.username
+        password = creds.password
+      } : null
+    )
+  }
 }
 
 # Calls ACR's own importImage ARM action directly - the exact operation `az acr import` itself
@@ -67,18 +83,11 @@ resource "azapi_resource_action" "acr_import" {
   method      = "POST"
 
   body = {
-    source = merge(
-      {
-        registryUri = local.acr_import_registry[each.value]
-        sourceImage = local.acr_import_path[each.value]
-      },
-      (local.acr_import_credentials[each.value].username != null && local.acr_import_credentials[each.value].password != null) ? {
-        credentials = {
-          username = local.acr_import_credentials[each.value].username
-          password = local.acr_import_credentials[each.value].password
-        }
-      } : {}
-    )
+    source = {
+      registryUri = local.acr_import_registry[each.value]
+      sourceImage = local.acr_import_path[each.value]
+      credentials = local.acr_import_credentials_or_null[each.value]
+    }
     targetTags = ["${local.acr_import_path[each.value]}"]
     mode       = "Force"
   }
