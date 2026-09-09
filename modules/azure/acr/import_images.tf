@@ -47,21 +47,35 @@ locals {
       password = var.source_registry_password
     }
   }
-  # A single ternary between "a real {username,password} object" and literal `null` - not the
-  # `merge({...}, cond ? {credentials = {...}} : {})` shape this replaced. Real bug that shape hit
-  # live: HCL's conditional-expression type unification pads the untaken `{}` branch with a
-  # `credentials` attribute too (to match the other branch's object type), but fills its nested
-  # username/password with null rather than omitting the key - Azure's importImage API then sees a
-  # *present* credentials object with a null password and rejects it ("The Password field is
-  # required"), instead of treating it as "no credentials supplied". Both branches here are the
-  # exact same type (object(...) or null), so there's nothing to unify a nested null into.
-  acr_import_credentials_or_null = {
-    for image, creds in local.acr_import_credentials : image => (
-      creds.username != null && creds.password != null ? {
-        username = creds.username
-        password = creds.password
-      } : null
-    )
+  # Every attempt to express "credentials is either a real {username,password} object, or absent"
+  # as a plain HCL value - a `merge({...}, cond ? {credentials={...}} : {})`, then a single ternary
+  # between an object and literal `null` - hit the exact same real bug live: Azure's importImage
+  # API rejected a *present* credentials object with a null password ("The Password field is
+  # required") instead of treating it as "no credentials supplied". HCL's conditional-expression
+  # type unification pads whichever instances lack real credentials with null-valued fields rather
+  # than omitting the key, and this happens across every for_each instance of the SAME resource
+  # (azapi_resource_action.acr_import here has one instance per image) - not just within a single
+  # ternary's own two branches, which is why restructuring just the local didn't fix it either.
+  # Routing the whole body through jsonencode/jsondecode per-image sidesteps this entirely: each
+  # map value here is a STRING (jsonencode's return type is always string, so acr_import_body_json
+  # itself is uniformly map(string) - no per-key object-shape unification possible at that level),
+  # and jsondecode() at the point of use in the resource below yields a fully dynamic value with no
+  # static HCL object type at all for Terraform to unify across instances.
+  acr_import_body_json = {
+    for image in var.images_to_import : image => jsonencode({
+      source = {
+        registryUri = local.acr_import_registry[image]
+        sourceImage = local.acr_import_path[image]
+        credentials = (
+          local.acr_import_credentials[image].username != null && local.acr_import_credentials[image].password != null ? {
+            username = local.acr_import_credentials[image].username
+            password = local.acr_import_credentials[image].password
+          } : null
+        )
+      }
+      targetTags = ["${local.acr_import_path[image]}"]
+      mode       = "Force"
+    })
   }
 }
 
@@ -82,15 +96,7 @@ resource "azapi_resource_action" "acr_import" {
   action      = "importImage"
   method      = "POST"
 
-  body = {
-    source = {
-      registryUri = local.acr_import_registry[each.value]
-      sourceImage = local.acr_import_path[each.value]
-      credentials = local.acr_import_credentials_or_null[each.value]
-    }
-    targetTags = ["${local.acr_import_path[each.value]}"]
-    mode       = "Force"
-  }
+  body = jsondecode(local.acr_import_body_json[each.value])
 }
 
 output "import_images_enabled" {

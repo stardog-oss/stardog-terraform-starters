@@ -51,12 +51,17 @@ run "import_body_distinguishes_registry_prefix_from_namespace_and_wires_jfrog_cr
     error_message = "a jfrog.io source registry must use the jfrog_registry_username/password variables, not source_registry_username/password."
   }
 
-  # NOTE: a stricter assertion belongs here too - "no source_registry_username/password configured
-  # for a non-jfrog image must mean body.source.credentials is fully null, not a credentials object
-  # with null username/password" (the real bug this module hit live: Azure's importImage API
-  # rejected the latter as invalid, not "anonymous"). Every attempt to assert that here hits the
-  # test framework's own sensitivity-comparison limitations (nonsensitive() at any wrapping point
-  # tried still leaves the comparison itself erroring rather than evaluating true/false) - verified
-  # correct instead via the actual live apply after this fix (see the git history/PR for the real
-  # ImportImage request that succeeded).
+  # Real bug caught live, twice: Azure's importImage API rejects a *present* credentials object
+  # with a null password ("The Password field is required") rather than treating it as "no
+  # credentials supplied". Two earlier HCL-only fixes (a merge() with a mismatched-shape ternary,
+  # then a same-shape object-or-null ternary) both still produced this live, because HCL's
+  # conditional-expression type unification pads null-valued fields across every for_each instance
+  # of the resource, not just within one ternary's own branches. The actual fix routes body through
+  # jsonencode/jsondecode per-instance (see acr_import_body_json) - asserting strict equality with
+  # `null` here is exactly what would have caught both regressions before they ever reached a real
+  # apply.
+  assert {
+    condition     = nonsensitive(azapi_resource_action.acr_import["stardog/stardog:11.2.5"].body).source.credentials == null
+    error_message = "no source_registry_username/password configured for a non-jfrog image must mean a fully null credentials value, not a credentials object with null username/password (Azure's importImage API rejects the latter as invalid, not 'anonymous')."
+  }
 }
