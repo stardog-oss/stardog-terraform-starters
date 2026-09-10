@@ -1,3 +1,9 @@
+variable "manage_akv" {
+  description = "When true (default), create the Key Vault. When false, reference an already-existing vault matching `name`/`resource_group_name` via a data source instead of creating a duplicate - for isolated per-instance stacks that need to attach role assignments/secrets to a vault owned and created elsewhere."
+  type        = bool
+  default     = true
+}
+
 variable "resource_group_name" {
   description = "Name of the Azure Resource Group that will contain the Key Vault. Set to null to accept a value passed from a parent module."
   type        = string

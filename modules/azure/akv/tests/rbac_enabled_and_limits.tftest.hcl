@@ -22,12 +22,12 @@ run "kv_plan" {
   }
 
   assert {
-    condition     = azurerm_key_vault.this.rbac_authorization_enabled == true
+    condition     = azurerm_key_vault.this[0].rbac_authorization_enabled == true
     error_message = "Key Vault must have RBAC authorization enabled."
   }
 
   assert {
-    condition     = length(azurerm_key_vault.this.name) <= 24
+    condition     = length(azurerm_key_vault.this[0].name) <= 24
     error_message = "Key Vault name should be <= 24 chars."
   }
 }
