@@ -1,3 +1,3 @@
-output "id" { value = azurerm_key_vault.this.id }
-output "name" { value = azurerm_key_vault.this.name }
-output "vault_uri" { value = azurerm_key_vault.this.vault_uri }
+output "id" { value = local.akv_id }
+output "name" { value = local.akv_name }
+output "vault_uri" { value = local.akv_vault_uri }

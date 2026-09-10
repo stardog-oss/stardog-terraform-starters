@@ -7,6 +7,8 @@ locals {
 }
 
 resource "azurerm_key_vault" "this" {
+  count = var.manage_akv ? 1 : 0
+
   name                       = var.name
   location                   = var.location
   resource_group_name        = var.resource_group_name
@@ -33,6 +35,23 @@ resource "azurerm_key_vault" "this" {
   }
 }
 
+# manage_akv = false references an already-existing vault via data source instead of creating one -
+# mirrors modules/azure/acr's own manage_acr flag exactly, same rationale: isolated per-instance
+# stacks that each need to attach role assignments/secrets to one shared vault owned elsewhere,
+# without each one creating (and forking) its own duplicate copy of it.
+data "azurerm_key_vault" "existing" {
+  count = var.manage_akv ? 0 : 1
+
+  name                = var.name
+  resource_group_name = var.resource_group_name
+}
+
+locals {
+  akv_id        = var.manage_akv ? azurerm_key_vault.this[0].id : data.azurerm_key_vault.existing[0].id
+  akv_name      = var.manage_akv ? azurerm_key_vault.this[0].name : data.azurerm_key_vault.existing[0].name
+  akv_vault_uri = var.manage_akv ? azurerm_key_vault.this[0].vault_uri : data.azurerm_key_vault.existing[0].vault_uri
+}
+
 # Grant Key Vault Secrets Officer to the admin group (when provided)
 resource "azurerm_role_assignment" "kv_secret_officer_admin_group" {
   # rbac_authorization_enabled gate added - real bug this fixes: this assignment was missing the
@@ -43,7 +62,7 @@ resource "azurerm_role_assignment" "kv_secret_officer_admin_group" {
   # description promising the group gets administered) silently ended up with zero real access,
   # since the access_policy block above only ever covers admin_object_id, never the group.
   count                = var.rbac_authorization_enabled && var.admin_group_object_id != null && trimspace(var.admin_group_object_id) != "" ? 1 : 0
-  scope                = azurerm_key_vault.this.id
+  scope                = local.akv_id
   role_definition_name = "Key Vault Secrets Officer"
   principal_id         = var.admin_group_object_id
 }
@@ -51,7 +70,7 @@ resource "azurerm_role_assignment" "kv_secret_officer_admin_group" {
 # Optionally grant the specified admin_object_id (single user/SP) the role
 resource "azurerm_role_assignment" "kv_secret_officer_admin_object" {
   count                = var.rbac_authorization_enabled && var.admin_object_id != null && var.admin_object_id != "" ? 1 : 0
-  scope                = azurerm_key_vault.this.id
+  scope                = local.akv_id
   role_definition_name = "Key Vault Secrets Officer"
   principal_id         = var.admin_object_id
 }
