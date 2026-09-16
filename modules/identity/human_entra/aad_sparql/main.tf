@@ -57,11 +57,15 @@ resource "azuread_application" "app" {
     for_each = var.app_roles
     content {
       allowed_member_types = app_role.value.allowed_member_types
-      description          = app_role.value.description
-      display_name         = app_role.value.display_name
-      enabled              = true
-      id                   = local.app_role_ids[app_role.key]
-      value                = app_role.key
+      # azuread_application rejects an empty app_role.description outright - fall back to
+      # display_name (same convention the module's own original 3 hardcoded roles used:
+      # description identical to the role's own name) rather than requiring every caller to
+      # remember to set one.
+      description  = coalesce(app_role.value.description != "" ? app_role.value.description : null, app_role.value.display_name)
+      display_name = app_role.value.display_name
+      enabled      = true
+      id           = local.app_role_ids[app_role.key]
+      value        = app_role.key
     }
   }
 
