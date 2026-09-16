@@ -4,6 +4,14 @@ locals {
   graph_app_id           = "00000003-0000-0000-c000-000000000000"
   user_read_id           = "e1fe6dd8-ba31-4d61-89e7-88639da4683d"
   effective_display_name = coalesce(var.display_name, "${var.inst_id} - SPARQL")
+
+  # Fixed, never-changed namespace UUID for this module's own app-role-id derivation - any valid
+  # UUID works here, it just must never change once in use (same stability guarantee the 3
+  # original hardcoded role GUIDs were hand-picked to provide, just automated instead of manually
+  # authored - see var.app_roles). Renaming a role key changes its derived id, which is
+  # intentionally equivalent to retiring that role and introducing a new one.
+  app_role_id_namespace = "9c3b6b2e-2b8b-4c9a-8f7a-2a2f9e6d6a90"
+  app_role_ids          = { for key, role in var.app_roles : key => uuidv5(local.app_role_id_namespace, key) }
 }
 
 # Get the current authenticated client (user or service principal)
@@ -45,29 +53,16 @@ resource "azuread_application" "app" {
     }
   }
 
-  app_role {
-    allowed_member_types = ["User", "Application"]
-    description          = "reader"
-    display_name         = "reader"
-    enabled              = true
-    id                   = "8797249a-1696-4ccf-85f7-d7b2a5ef514e"
-    value                = "reader"
-  }
-  app_role {
-    allowed_member_types = ["Application"]
-    description          = "writer"
-    display_name         = "writer"
-    enabled              = true
-    id                   = "3955cf75-ad5a-4e69-b08c-ad5d4798e732"
-    value                = "writer"
-  }
-  app_role {
-    allowed_member_types = ["User", "Application"]
-    description          = "admin"
-    display_name         = "admin"
-    enabled              = true
-    id                   = "97932c93-52c2-4561-a7a7-7fea2443c6d7"
-    value                = "admin"
+  dynamic "app_role" {
+    for_each = var.app_roles
+    content {
+      allowed_member_types = app_role.value.allowed_member_types
+      description          = app_role.value.description
+      display_name         = app_role.value.display_name
+      enabled              = true
+      id                   = local.app_role_ids[app_role.key]
+      value                = app_role.key
+    }
   }
 
   web {
