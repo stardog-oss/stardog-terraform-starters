@@ -46,3 +46,24 @@ variable "shell_interpreter" {
   type        = list(string)
   default     = ["/usr/bin/env", "bash", "-c"]
 }
+
+variable "app_roles" {
+  description = <<-EOT
+    Entra app roles to define on this application - a name (the map key) plus descriptive
+    metadata only. Each role's real Entra appRole.id is derived deterministically from its own key
+    (see local.app_role_ids in main.tf, and the app_role_ids output) rather than accepted here -
+    callers never invent or pass a GUID. Defaults to this module's original 3 roles, preserving
+    their exact allowed_member_types asymmetry (writer is Application-only; reader/admin are
+    User+Application).
+  EOT
+  type = map(object({
+    display_name         = string
+    description          = optional(string, "")
+    allowed_member_types = optional(list(string), ["User", "Application"])
+  }))
+  default = {
+    reader = { display_name = "reader", description = "reader", allowed_member_types = ["User", "Application"] }
+    writer = { display_name = "writer", description = "writer", allowed_member_types = ["Application"] }
+    admin  = { display_name = "admin", description = "admin", allowed_member_types = ["User", "Application"] }
+  }
+}
