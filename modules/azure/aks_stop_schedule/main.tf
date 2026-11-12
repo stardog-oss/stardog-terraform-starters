@@ -6,8 +6,11 @@ locals {
 
   runbook_clean = join("", regexall("[0-9a-z-]", lower("${var.cluster_name}-daily-stop")))
   runbook_name  = substr(local.runbook_clean, 0, 49)
+  stop_times_by_id = var.daily_stop_times_by_id != null ? var.daily_stop_times_by_id : {
+    for t in var.daily_stop_times : replace(t, ":", "") => t
+  }
   stop_schedule_specs = {
-    for t in var.daily_stop_times : replace(t, ":", "") => {
+    for schedule_id, t in local.stop_times_by_id : schedule_id => {
       time = t
       time_formatted = format(
         "%02d:%02d:00",
@@ -15,7 +18,7 @@ locals {
         tonumber(split(":", t)[1])
       )
       schedule_name = substr(
-        join("", regexall("[0-9a-z-]", lower("${var.cluster_name}-stop-daily-${replace(t, ":", "")}"))),
+        join("", regexall("[0-9a-z-]", lower("${var.cluster_name}-stop-daily-${schedule_id}"))),
         0,
         49
       )

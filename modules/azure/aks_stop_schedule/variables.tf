@@ -62,6 +62,23 @@ variable "daily_stop_times" {
   }
 }
 
+variable "daily_stop_times_by_id" {
+  description = "Optional stable schedule ID to local HH:MM map. Retain IDs when changing times to preserve schedule names and runbook bindings. Overrides daily_stop_times."
+  type        = map(string)
+  default     = null
+
+  validation {
+    condition = var.daily_stop_times_by_id == null ? true : (
+      length(var.daily_stop_times_by_id) > 0 && alltrue([
+        for key, value in var.daily_stop_times_by_id :
+        can(regex("^[a-z0-9][a-z0-9-]{0,15}$", key)) &&
+        can(regex("^([01][0-9]|2[0-3]):[0-5][0-9]$", value))
+      ])
+    )
+    error_message = "daily_stop_times_by_id requires nonempty stable lowercase IDs (up to 16 letters, digits or hyphens) and valid HH:MM times."
+  }
+}
+
 variable "schedule_timezone" {
   description = "IANA timezone name used by the automation schedule (e.g., America/Toronto)."
   type        = string
